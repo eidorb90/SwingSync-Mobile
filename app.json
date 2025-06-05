@@ -37,6 +37,9 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "BACKEND_URL": "http://api.swing-sync.com"
     }
   }
 }
