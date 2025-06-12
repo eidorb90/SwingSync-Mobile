@@ -2,11 +2,26 @@ import AntDesign from '@expo/vector-icons/AntDesign';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { HeaderShownContext } from '@react-navigation/elements';
 import { Tabs } from "expo-router";
+import { Platform } from 'react-native';
 
 export default function TabsLayout() {
   return (
-  <Tabs screenOptions={{ tabBarActiveTintColor: "blue", tabBarInactiveTintColor: "gray", headerShown: false}}>
-    
+    <Tabs 
+      screenOptions={{ 
+        tabBarActiveTintColor: "blue", 
+        tabBarInactiveTintColor: "gray", 
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: 'transparent', 
+          position: 'absolute',
+          elevation: 0,
+          borderTopWidth: 0,
+          ...(Platform.OS === 'ios' ? {
+            blurEffect: 'light',
+          } : {})
+        }
+      }}
+    >
     <Tabs.Screen name="Home" options={{title: "Home", tabBarIcon: ({ color }) => (
       <AntDesign name="home" size={24} color={ color } />
     )}}/>
@@ -24,6 +39,20 @@ export default function TabsLayout() {
       }}
     />
 
+    <Tabs.Screen 
+      name="Community" 
+      options={{
+        title: "Community",
+        tabBarIcon: ({ color, focused }) => (
+          focused ? (
+            <Ionicons name="people" size={24} color={ color } />
+          ) : (
+            <Ionicons name="people-outline" size={24} color={ color } />
+          )
+        )
+      }}
+    />
+    
     <Tabs.Screen 
       name="Rounds" 
       options={{

@@ -91,11 +91,11 @@ export function AuthProvider({ children }) {
         body: JSON.stringify(credentials),
       });
 
-      if (response.ok) {
+      if (response.status === 200) {
         setLoading(false);
         console.log("Sign in successful");
         const data = await response.json();
-        await AsyncStorage.setItem("authToken", data.refresh);
+        await AsyncStorage.setItem("authToken", data.access);
         setIsAuthenticated(true);
         setNeedsVerification(false);
         return null;

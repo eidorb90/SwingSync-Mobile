@@ -1,12 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
-import WoodyChatComponent from '../components/WoodyChatComponent';
 
-export default function WoodyChat() {
+export default function CommunityScreen() {
     return (
         <LinearGradient style={styles.background} colors={['#000026', "#000080", '#000026']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <View style={styles.container}>
-                <WoodyChatComponent />
+                <Text style={styles.title}>Community</Text>
+                <Text style={styles.subtitle}>Coming soon...</Text>
             </View>
         </LinearGradient>
     )
@@ -18,6 +18,8 @@ const styles = StyleSheet.create({
     },
     container: {
         flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
         padding: 20,
     },
     title: {

@@ -77,22 +77,20 @@ export default function AuthScreen() {
                 console.log("Sign up error:", error);
                 setError(error);
             }
-        } else {
-            console.log("Signing in with", username, password);
-            const error = await signIn(username, password);
-            console.log("Sign in error type:", typeof error, "value:", JSON.stringify(error));
-            
-            if (error === "UNVERIFIED_ACCOUNT") {
-                console.log("Attempting to redirect to verify page");
-                return;
-            } else if (error) {
-                console.log("Sign in error:", error);
-                setError(error);
             } else {
-                console.log("Sign in successful");
-                router.replace("/Home");
+                console.log("Signing in with", username, password);
+                const error = await signIn(username, password);
+                console.log("Sign in error type:", typeof error, "value:", JSON.stringify(error));
+                
+                if (error) {
+                    console.log("Sign in error:", error);
+                    setError(error);
+                    return;
+                } else {
+                    console.log("Sign in successful");
+                    router.replace("/Home");
+                }
             }
-        }
     };
 
     if (loading) {

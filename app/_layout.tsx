@@ -1,18 +1,28 @@
 import { Stack, useRouter } from "expo-router";
 import { useEffect } from "react";
-import { useAuth } from "../context/AuthContext";
-import { AuthProvider } from "../context/AuthContext";
+import { DefaultTheme, Provider as PaperProvider } from "react-native-paper";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AuthProvider, useAuth } from "../context/AuthContext";
+
+const theme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: "#0000FF", // This matches your button color
+    accent: "#00BFFF", // This matches your active outline color
+  },
+};
 
 function RootLayout() {
   const router = useRouter();
-  const { isAuthenticated, loading, needsVerification } = useAuth(); 
+  const { isAuthenticated, loading, needsVerification } = useAuth();
 
   useEffect(() => {
     if (!loading) {
       if (needsVerification) {
         router.replace("/verify");
       } else if (!isAuthenticated) {
-        router.replace("/auth"); 
+        router.replace("/auth");
       }
     }
   }, [isAuthenticated, loading, needsVerification]);
@@ -30,8 +40,12 @@ function RootLayout() {
 
 export default function LayoutWrapper() {
   return (
-    <AuthProvider>
-      <RootLayout />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <PaperProvider theme={theme}>
+        <AuthProvider>
+          <RootLayout />
+        </AuthProvider>
+      </PaperProvider>
+    </SafeAreaProvider>
   );
 }

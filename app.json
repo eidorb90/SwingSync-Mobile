@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "SwingSync",
-    "slug": "SwingSync",
+    "slug": "swing-sync",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,14 +9,21 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "SwingSync needs access to your camera to take photos for your profile and other app features.",
+        "NSPhotoLibraryUsageDescription": "SwingSync needs access to your photo library to let you select and upload images.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.eidorb.swingsync"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.eidorb.swingsync"
     },
     "web": {
       "bundler": "metro",
@@ -39,7 +46,12 @@
       "typedRoutes": true
     },
     "extra": {
-      "BACKEND_URL": "http://api.swing-sync.com"
-    }
+      "BACKEND_URL": "http://api.swing-sync.com",
+      "router": {},
+      "eas": {
+        "projectId": "ee3838ec-f372-487a-b19b-c716e644ae77"
+      }
+    },
+    "owner": "eidorb"
   }
 }
