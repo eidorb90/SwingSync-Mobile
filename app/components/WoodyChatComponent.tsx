@@ -3,9 +3,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { StatusBar } from 'expo-status-bar';
+import { fetch } from 'expo/fetch';
 import { jwtDecode } from "jwt-decode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Markdown from 'react-native-markdown-display';
 import { ActivityIndicator, Text, TextInput } from "react-native-paper";
 
 const router = useRouter();
@@ -22,6 +24,7 @@ export default function WoodyChatComponent() {
   const [error, setError] = useState<string | null>(null);
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [forceRefresh, setForceRefresh] = useState(0);
+  const [addRounds, setAddRounds] = useState(false);
 
   useEffect(() => {
     fetchTokenAndSetUserID();
@@ -69,54 +72,51 @@ export default function WoodyChatComponent() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/`, {
+
+        const response = await fetch(`${BACKEND_URL}/api/chat/`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: userMessage.text }),
-      });
+        body: JSON.stringify({ message: userMessage.text, add_rounds: addRounds }),
+        });
 
-      if (!response.ok) throw new Error("Failed to send message");
+        if (!response.ok) throw new Error("Failed to send message");
 
-      const text = await response.text();
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let botMessageIndex = -1;
+        
+        setMessages(prev => {
+            const newMessages = [...prev, { text: "", sender: 'bot', timestamp: new Date().toISOString() }];
+            botMessageIndex = newMessages.length - 1;
+            return newMessages;
+        });
 
-      let accumulatedText = "";
-
-      setMessages(prev => [
-        ...prev,
-        { text: "", sender: "bot", timestamp: new Date().toISOString() }
-      ]);
-
-      const lines = text.split("\n").filter(Boolean);
-      lines.forEach((line) => {
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed.chunk) {
-            accumulatedText += parsed.chunk;
+        while (true) {
+            const { done, value } = await reader?.read() || {};
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
             setMessages(prev => {
-              const updated = [...prev];
-              const lastMessage = updated[updated.length - 1];
-              if (lastMessage?.sender === "bot") {
-                updated[updated.length - 1] = {
-                  ...lastMessage,
-                  text: accumulatedText,
-                };
-              }
-              return updated;
+                const newMessages = [...prev];
+                if (botMessageIndex !== -1) {
+                    newMessages[botMessageIndex] = {
+                        ...newMessages[botMessageIndex],
+                        text: newMessages[botMessageIndex].text + chunk
+                    };
+                }
+                return newMessages;
             });
-          }
-        } catch (err) {
-          console.error("Failed to parse chunk:", err);
         }
-      });
 
     } catch (error: any) {
       console.error("Message error:", error);
       setError("Failed to send message. Please try again.");
     } finally {
       setLoading(false);
+      setAddRounds(false);
     }
   };
 
@@ -175,7 +175,7 @@ export default function WoodyChatComponent() {
               ) : (
                 <View style={styles.row}>
                   <Ionicons name="golf" size={24} color="#fff" style={styles.woodyIcon} />
-                  <Text style={styles.botText}>{msg.text}</Text>
+                  <Markdown style={markdownStyles}>{msg.text}</Markdown>
                 </View>
               )}
             </View>
@@ -214,12 +214,13 @@ export default function WoodyChatComponent() {
         >
           <Ionicons name="send" size={22} color="#fff" />
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setAddRounds(true)}>
+            <Text style={styles.sendButton} onPress={() => {setAddRounds(true)}} >Rounds</Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
-
-
 
 const styles = StyleSheet.create({
     background: {
@@ -263,10 +264,11 @@ const styles = StyleSheet.create({
     },
     messageBubble: {
         marginVertical: 6,
-        maxWidth: '85%',
+        maxWidth: '95%',
         borderRadius: 16,
         padding: 12,
-        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'flex-start',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.08,
@@ -277,42 +279,49 @@ const styles = StyleSheet.create({
         backgroundColor: '#00BFFF',
         alignSelf: 'flex-end',
         borderTopRightRadius: 4,
-        flexDirection: 'row',
     },
     botBubble: {
         backgroundColor: '#1E90FF',
         alignSelf: 'flex-start',
         borderTopLeftRadius: 4,
-        flexDirection: 'row',
+        overflow: 'hidden',
     },
     row: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
+        flex: 1,
+        flexWrap: 'wrap',
     },
     userText: {
         color: '#fff',
         fontSize: 16,
         marginRight: 8,
         flexShrink: 1,
+        flex: 1,
     },
     botText: {
         color: '#fff',
         fontSize: 16,
         marginLeft: 8,
         flexShrink: 1,
+        flex: 1,
     },
     avatar: {
         width: 32,
         height: 32,
         borderRadius: 16,
+        marginRight: 8,
         marginLeft: 4,
         borderWidth: 1,
         borderColor: '#fff',
+        alignSelf: 'flex-end',
     },
     woodyIcon: {
         backgroundColor: '#000080',
         borderRadius: 16,
         padding: 2,
+        marginRight: 8,
+        alignSelf: 'flex-start',
     },
     inputBar: {
         flexDirection: 'row',
@@ -320,7 +329,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingBottom: Platform.OS === "ios" ? 24 : 10,
         backgroundColor: 'rgba(0,0,0,0.15)',
-        marginBottom: 56, 
+        marginBottom: 56,
     },
     input: {
         flex: 1,
@@ -346,5 +355,127 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         textAlign: 'center',
         fontSize: 15,
+    },
+});
+
+const markdownStyles = StyleSheet.create({
+    // General body text for Markdown content inside a bubble
+    body: {
+        color: '#fff', // White text for bot messages
+        fontSize: 16,
+        lineHeight: 22,
+        flexShrink: 1,
+        flexWrap: 'wrap', // Explicitly enables text wrapping within Text components
+    },
+    // Headings
+    heading1: {
+        color: '#fff',
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginTop: 10,
+        marginBottom: 5,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    heading2: {
+        color: '#fff',
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginTop: 8,
+        marginBottom: 4,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    heading3: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginTop: 6,
+        marginBottom: 3,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    strong: {
+        fontWeight: 'bold',
+    },
+    em: {
+        fontStyle: 'italic',
+    },
+    link: {
+        color: '#ADD8E6',
+        textDecorationLine: 'underline',
+    },
+    listUnorderedItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 4,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    listOrderedItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 4,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    listItem: {
+        color: '#fff',
+        fontSize: 16,
+        lineHeight: 22,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    code: {
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        borderRadius: 6,
+        padding: 8,
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        color: '#ADFF2F',
+        marginTop: 5,
+        marginBottom: 5,
+        flexShrink: 1,
+        flexWrap: 'wrap', // Important for code blocks
+        overflow: 'hidden', // Helps if code is extremely long
+    },
+    inlineCode: {
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        borderRadius: 4,
+        paddingHorizontal: 4,
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        color: '#ADFF2F',
+    },
+    blockquote: {
+        borderLeftColor: '#7B68EE',
+        borderLeftWidth: 4,
+        paddingLeft: 10,
+        opacity: 0.9,
+        marginTop: 5,
+        marginBottom: 5,
+        flexShrink: 1,
+        flexWrap: 'wrap',
+    },
+    table: {
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+        borderRadius: 4,
+        marginTop: 10,
+        marginBottom: 10,
+        flexShrink: 1,
+    },
+    tableRow: {
+        flexDirection: 'row',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255,255,255,0.2)',
+    },
+    tableHeader: {
+        backgroundColor: 'rgba(0,0,0,0.1)',
+    },
+    tableCell: {
+        padding: 8,
+        color: '#fff',
+        fontSize: 14,
+        flex: 1,
+        flexWrap: 'wrap',
     },
 });

@@ -235,7 +235,6 @@ export default function SettingsScreen() {
                 <Text style={styles.settingsItemText} onPress={redirectToAccountSettings}>
                   Account Settings
                 </Text>
-                <Text style={styles.settingsItemText} onLongPress={redirectToAccountSettings} >Account Settings</Text>
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.settingsItem}>
