@@ -214,8 +214,11 @@ export default function WoodyChatComponent() {
         >
           <Ionicons name="send" size={22} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setAddRounds(true)}>
-            <Text style={styles.sendButton} onPress={() => {setAddRounds(true)}} >Rounds</Text>
+        <TouchableOpacity 
+          style={[styles.sendButton, { marginLeft: 8, backgroundColor: addRounds ? "#00FF00" : "#0000FF" }]}
+          onPress={() => setAddRounds(!addRounds)}
+        >
+          <Text style={{ color: '#fff', fontSize: 12 }}>Rounds</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>

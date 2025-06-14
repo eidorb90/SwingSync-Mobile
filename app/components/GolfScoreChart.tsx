@@ -121,56 +121,50 @@ const GolfScoreChart: React.FC<GolfScoreChartProps> = ({ userData }) => {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Recent Rounds for {userData.username}</Text>
-
-      <View style={styles.chartContainer}>
-        <Text style={styles.chartTitle}>Total Score Per Round</Text>
-        <LineChart
-          data={chartData}
-          width={screenWidth - 40} 
-          height={220}
-          chartConfig={chartConfig}
-          bezier
-          style={styles.chartStyle}
-          formatYLabel={(value) => `${value}`}
-        />
-      </View>
-
-    </ScrollView>
+    <View style={styles.chartContainer}>
+      <Text style={styles.chartTitle}>Total Score Per Round</Text>
+      <LineChart
+        data={chartData}
+        width={screenWidth - 40} 
+        height={220}
+        chartConfig={chartConfig}
+        bezier
+        style={styles.chartStyle}
+        formatYLabel={(value) => `${value}`}
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: 'transparent',
-    padding: 15,
+    padding: 5,
   },
   header: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 10,
     color: '#fff', 
   },
   chartContainer: {
-    marginVertical: 10,
+    marginVertical: 2,
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: 'rgba(0, 0, 38, 0.5)', 
     alignItems: 'center',
-    padding: 10,
+    padding: 5,
   },
   chartTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#fff',
-    marginTop: 5,
-    marginBottom: 10,
+    marginTop: 2,
+    marginBottom: 5,
   },
   chartStyle: {
-    marginVertical: 8,
+    marginVertical: 2,
     borderRadius: 8,
   },
   infoContainer: {
@@ -191,10 +185,10 @@ const styles = StyleSheet.create({
   },
   noDataText: {
     textAlign: 'center',
-    fontSize: 16,
+    fontSize: 14,
     color: '#fff',
-    marginTop: 20,
-    marginBottom: 20,
+    marginTop: 10,
+    marginBottom: 10,
   }
 });
 

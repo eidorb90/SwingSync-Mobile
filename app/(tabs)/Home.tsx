@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Image, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Text } from "react-native-paper";
 import GolfScoreChart from "../components/GolfScoreChart";
+import HandicapChart from "../components/HandicapChart";
 
 const BACKEND_URL = Constants.expoConfig?.extra?.BACKEND_URL;
 
@@ -193,6 +194,7 @@ export default function HomeScreen() {
                 </View>
               ) : userData ? (
                 <View style={styles.chartContainer}>
+                  <HandicapChart/>
                   <GolfScoreChart userData={userData} />
                 </View>
               ) : (
@@ -214,17 +216,17 @@ const styles = StyleSheet.create({
   contentContainer: {
     flex: 1,
     justifyContent: 'center', 
-    paddingVertical: 20,
+    paddingVertical: 10,
   },
   headerContainer: {
-    padding: 20,
+    padding: 10,
     alignItems: 'center',
   },
   title: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: "bold",
     color: "#fff",
-    marginBottom: 10,
+    marginBottom: 5,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
@@ -252,15 +254,16 @@ const styles = StyleSheet.create({
   chartContainer: {
     width: '100%',
     paddingHorizontal: 5,
+    paddingVertical: 0,
   },
   loadingContainer: {
     alignItems: 'center',
-    padding: 30,
+    padding: 15,
   },
   loadingText: {
     color: '#fff',
-    marginTop: 15,
-    fontSize: 16,
+    marginTop: 10,
+    fontSize: 14,
   },
   emptyStateContainer: {
     justifyContent: 'center',

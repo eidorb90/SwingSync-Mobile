@@ -3,6 +3,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { HeaderShownContext } from '@react-navigation/elements';
 import { Tabs } from "expo-router";
 import { Platform } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 export default function TabsLayout() {
   return (
@@ -62,6 +63,20 @@ export default function TabsLayout() {
             <Ionicons name="golf" size={24} color={ color } />
           ) : (
             <Ionicons name="golf-outline" size={24} color={ color } />
+          )
+        )
+      }}
+    />
+
+    <Tabs.Screen 
+      name="Training" 
+      options={{
+        title: "Training",
+        tabBarIcon: ({ color, focused }) => (
+          focused ? (
+            <MaterialCommunityIcons name="run-fast" size={24} color={color} />
+          ) : (
+            <MaterialCommunityIcons name="run" size={24} color={color} />
           )
         )
       }}

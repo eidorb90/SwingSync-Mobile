@@ -117,7 +117,7 @@ export default function RoundInput() {
 
   // Drafts state
   const [holeCountSelection, setHoleCountSelection] = useState<9|18>(18);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [drafts, setDrafts] = useState<Draft[]>([]) || null;
   const [draftsDialogVisible, setDraftsDialogVisible] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string|null>(null);
 
@@ -809,6 +809,28 @@ export default function RoundInput() {
               )}
             </Card.Actions>
           </Card>
+          <Button 
+            mode="outlined" 
+            onPress={() => {
+              // Reset all round state
+              setStarted(false);
+              setCurrentHole(0);
+              setScores([]);
+              setSelectedCourse(null);
+              setSelectedGender("");
+              setSelectedTee("");
+              setCourseQuery("");
+              setNotes("");
+              setCurrentDraftId(null);
+              setShowSummary(false);
+              
+              showAlert("Round unloaded", "info");
+            }}
+            style={{ marginTop: 10, borderColor: "#ff6b6b" }}
+            textColor="#ff6b6b"
+          >
+            Unload Round
+          </Button>
           {alert.open && (
             <View style={styles.snackbar}>
               <Text style={{ color: alert.severity === "error" ? "#ff6b6b" : "#51cf66" }}>{alert.message}</Text>
