@@ -1,12 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
+import Entypo from '@expo/vector-icons/Entypo';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from "expo-router";
 import { StatusBar } from 'expo-status-bar';
 import { fetch } from 'expo/fetch';
 import { jwtDecode } from "jwt-decode";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import Markdown from 'react-native-markdown-display';
 import { ActivityIndicator, Text, TextInput } from "react-native-paper";
 
@@ -25,6 +28,11 @@ export default function WoodyChatComponent() {
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [forceRefresh, setForceRefresh] = useState(0);
   const [addRounds, setAddRounds] = useState(false);
+  const [addVideo, setAddVideo] = useState(false);
+  const [videoURL, setVideoURL] = useState<string | null>(null);
+  const [videoData, setVideoData] = useState<string | null>(null);
+  const [videoName, setVideoName] = useState<string | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
 
   useEffect(() => {
     fetchTokenAndSetUserID();
@@ -62,6 +70,46 @@ export default function WoodyChatComponent() {
     }
   }, [userID]);
 
+  const pickVideo = async () => {
+    try {
+      setUploadingVideo(true);
+      
+      // Request permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to make this work!');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        
+        // Convert video to base64
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        setVideoData(base64);
+        setVideoName(asset.fileName || `video_${Date.now()}.mp4`);
+        setAddVideo(true);
+        setAddRounds(false);
+        
+        Alert.alert("Video Selected", `${asset.fileName || 'Video'} is ready to send with your message.`);
+      }
+    } catch (error) {
+      console.error('Error picking video:', error);
+      Alert.alert("Error", "Failed to select video. Please try again.");
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!input.trim() || loading) return;
 
@@ -72,6 +120,20 @@ export default function WoodyChatComponent() {
     setLoading(true);
 
     try {
+        const payload: any = { 
+          message: userMessage.text, 
+          add_rounds: addRounds, 
+          add_video: addVideo 
+        };
+
+        if (addVideo && videoData) {
+          payload.video_data = videoData;
+          payload.video_name = videoName;
+        }
+
+        if (videoURL) {
+          payload.video_url = videoURL;
+        }
 
         const response = await fetch(`${BACKEND_URL}/api/chat/`, {
         method: "POST",
@@ -79,7 +141,7 @@ export default function WoodyChatComponent() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: userMessage.text, add_rounds: addRounds }),
+        body: JSON.stringify(payload),
         });
 
         if (!response.ok) throw new Error("Failed to send message");
@@ -117,6 +179,9 @@ export default function WoodyChatComponent() {
     } finally {
       setLoading(false);
       setAddRounds(false);
+      setAddVideo(false);
+      setVideoData(null);
+      setVideoName(null);
     }
   };
 
@@ -191,6 +256,14 @@ export default function WoodyChatComponent() {
         </ScrollView>
       </View>
       {error && <Text style={styles.error}>{error}</Text>}
+      {addVideo && videoName && (
+        <View style={styles.videoPreview}>
+          <Text style={styles.videoPreviewText}>Video ready: {videoName}</Text>
+          <TouchableOpacity onPress={() => { setAddVideo(false); setVideoData(null); setVideoName(null); }}>
+            <Ionicons name="close-circle" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
       <View style={styles.inputBar}>
         <TextInput
           value={input}
@@ -215,10 +288,22 @@ export default function WoodyChatComponent() {
           <Ionicons name="send" size={22} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.sendButton, { marginLeft: 8, backgroundColor: addRounds ? "#00FF00" : "#0000FF" }]}
+          style={[styles.sendButton, { marginLeft: 8, backgroundColor: addVideo ? "#FF0000" : (addRounds ? "#00FF00" : "#0000FF") }]}
+          disabled={addVideo}
           onPress={() => setAddRounds(!addRounds)}
         >
           <Text style={{ color: '#fff', fontSize: 12 }}>Rounds</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.sendButton, {marginLeft: 8, backgroundColor: uploadingVideo ? "#FFA500" : (addVideo ? "#00FF00" : "#0000FF")}]} 
+          onPress={pickVideo}
+          disabled={uploadingVideo}
+        >
+          {uploadingVideo ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Entypo name="attachment" size={24} color="white" />
+          )}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -358,6 +443,23 @@ const styles = StyleSheet.create({
         marginBottom: 8,
         textAlign: 'center',
         fontSize: 15,
+    },
+    videoPreview: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(0, 191, 255, 0.2)',
+        padding: 10,
+        marginHorizontal: 16,
+        marginBottom: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#00BFFF',
+    },
+    videoPreviewText: {
+        color: '#fff',
+        fontSize: 14,
+        flex: 1,
     },
 });
 

@@ -1007,6 +1007,17 @@ export default function RoundInput() {
             Start Round
           </Button>
         </Card.Actions>
+        <Card.Actions style={{justifyContent: "center", marginTop: 0}}>
+          <Button 
+            mode="outlined" 
+            onPress={() => {router.push('/ViewRounds')}}
+            style={[styles.button, { borderColor: "#00BFFF" }]}
+            textColor="#00BFFF"
+            icon={({color}) => <MaterialCommunityIcons name="view-list" size={18} color={color} />}
+          >
+            View Rounds
+          </Button>
+        </Card.Actions>
       </Card>
       
       {/* Drafts Dialog */}

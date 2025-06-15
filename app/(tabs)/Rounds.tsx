@@ -1,5 +1,5 @@
-import { Text} from 'react-native-paper';
-import { View, StyleSheet } from 'react-native';
+import { Text, Button } from 'react-native-paper';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import RoundInput from '../components/RoundInput';
 
