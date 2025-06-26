@@ -1003,7 +1003,7 @@ export default function RoundInput() {
                   icon="chevron-left"
                   textColor={currentHole === 0 ? "#666" : "#00BFFF"}
                 >
-                  Previous
+                  Back
                 </Button>
                 
                 {currentHole < scores.length - 1 ? (
@@ -1025,7 +1025,7 @@ export default function RoundInput() {
                     disabled={isSaving}
                     icon="check"
                   >
-                    Finish Round
+                    Finish
                   </Button>
                 )}
               </View>
@@ -1463,8 +1463,9 @@ const styles = StyleSheet.create({
   navButton: {
     flex: 1,
     borderRadius: 8,
-    paddingVertical: 2,
-    height: 36,
+    minHeight: 36,         
+    justifyContent: 'center',
+    alignItems: 'center',   
   },
   prevButton: {
     borderColor: 'rgba(0, 191, 255, 0.5)',

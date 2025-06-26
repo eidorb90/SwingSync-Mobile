@@ -110,7 +110,7 @@ export default function AuthScreen() {
                                 label="First Name"
                                 value={firstName}
                                 autoCapitalize="none"
-                                placeholder="Brodie"
+                                placeholder="John"
                                 mode="outlined"
                                 onChangeText={setFirstName}
                                 style={styles.input}
@@ -124,7 +124,7 @@ export default function AuthScreen() {
                                 label="Last Name"
                                 value={lastName}
                                 autoCapitalize="none"
-                                placeholder="Rogers"
+                                placeholder="Doe"
                                 mode="outlined"
                                 onChangeText={setLastName}
                                 style={styles.input}
@@ -138,7 +138,7 @@ export default function AuthScreen() {
                                 label="Email"
                                 value={email}
                                 autoCapitalize="none"
-                                placeholder="Brodie@swing-sync.com"
+                                placeholder="john.doe@swing-sync.com"
                                 onChangeText={setEmail}
                                 keyboardType="email-address"
                                 mode="outlined"
@@ -156,7 +156,7 @@ export default function AuthScreen() {
                         label="Username"
                         value={username}
                         autoCapitalize="none"
-                        placeholder="brodi"
+                        placeholder="JohnDoe123"
                         mode="outlined"
                         onChangeText={setUsername}
                         style={styles.input}
