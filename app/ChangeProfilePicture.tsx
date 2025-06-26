@@ -26,7 +26,6 @@ export default function ChangeProfilePicture() {
     const [background, setBackground] = useState<string | null>(null);
     const [location, setLocation] = useState<string | null>(null);
 
-    // Add state for AI modal visibility
     const [aiModalVisible, setAiModalVisible] = useState(false);
 
     useEffect(() => {
@@ -129,100 +128,7 @@ export default function ChangeProfilePicture() {
         }
     };
 
-    const uploadProfilePicture = async () => {
-        if (!profilePictureUri || !token || !userID) {
-            Alert.alert("Error", "Please select an image first");
-            return;
-        }
-
-        setUploading(true);
-
-        try {
-            const formData = new FormData();
-            
-            const uriParts = profilePictureUri.split('/');
-            const fileName = uriParts[uriParts.length - 1];
-            
-            console.log(`Preparing to upload image: ${fileName} from ${profilePictureUri}`);
-            
-            // @ts-ignore - TypeScript doesn't understand the structure of FormData for React Native
-            formData.append('profile_picture', {
-                uri: profilePictureUri,
-                type: profilePictureUri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
-                name: fileName,
-            });
-
-            console.log("Uploading image...");
-
-            const response = await fetch(`${BACKEND_URL}/api/user/${userID}/profile_picture/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    'Authorization': `Bearer ${token}`,
-                },
-                body: formData,
-            });
-
-            // Get the raw response text first for debugging
-            const responseText = await response.text();
-            console.log("Raw response:", responseText);
-            
-            // Then try to parse it as JSON if possible
-            let responseData;
-            try {
-                responseData = JSON.parse(responseText);
-                console.log("Upload response:", responseData);
-            } catch (e) {
-                console.log("Response is not valid JSON:", e);
-                responseData = { detail: "Server returned an invalid response" };
-            }
-
-            if (!response.ok) {
-                throw new Error(responseData.detail || `Upload failed with status ${response.status}`);
-            }
-
-            await AsyncStorage.setItem('profileImageTimestamp', Date.now().toString());
-            
-            Alert.alert(
-                "Success", 
-                "Profile picture updated successfully. Restart the app to see changes in all screens.",
-                [
-                    { 
-                        text: "OK", 
-                        onPress: () => {
-                            router.back();
-                        }
-                    }
-                ]
-            );
-        } catch (error: any) {
-            console.error('Upload error:', error);
-            
-            // More detailed error reporting
-            if (error.message.includes("No such file or directory")) {
-                Alert.alert(
-                    "Upload Error", 
-                    "The server had trouble processing your image. Please try selecting a different image format or taking a new photo.",
-                    [
-                        {
-                            text: "Try Again",
-                            onPress: () => {
-                                // Clear the current picture to force user to select a new one
-                                setProfilePictureUri(null);
-                            }
-                        }
-                    ]
-                );
-            } else {
-                Alert.alert("Error", error.message || "Failed to upload profile picture");
-            }
-        } finally {
-            setUploading(false);
-        }
-    };
-
     const genProfilePicture = async () => {
-        // Check if any field is empty and show the values for debugging
         console.log("Form values:", { action, look, pose, background, location });
         
         if (!action || !look || !pose || !background || !location) {
@@ -234,7 +140,7 @@ export default function ChangeProfilePicture() {
 
         try {
             const formData = new FormData();
-            formData.append('action', action);     // Changed from 'actions' to 'action'
+            formData.append('action', action);
             formData.append('look', look);
             formData.append('pose', pose);
             formData.append('background', background);
@@ -254,11 +160,9 @@ export default function ChangeProfilePicture() {
 
             console.log("AI generation response status:", response.status);
 
-            // For debugging, log the response text
             const responseText = await response.text();
             console.log("Response text:", responseText);
             
-            // Parse the response if it's JSON
             let responseData;
             try {
                 responseData = JSON.parse(responseText);
@@ -270,13 +174,24 @@ export default function ChangeProfilePicture() {
                 throw new Error(responseData.detail || 'Failed to generate profile picture');
             }
             
-            // Set the profile picture and close the modal
             if (responseData.profile_picture) {
                 setProfilePictureUri(responseData.profile_picture);
                 hideAiModal();
                 
-                // Show success message
-                Alert.alert("Success", "AI profile picture generated successfully!");
+                await AsyncStorage.setItem('profileImageTimestamp', Date.now().toString());
+                
+                Alert.alert(
+                    "Success", 
+                    "AI profile picture generated and uploaded successfully!",
+                    [
+                        { 
+                            text: "OK", 
+                            onPress: () => {
+                                router.back();
+                            }
+                        }
+                    ]
+                );
             } else {
                 throw new Error("No profile picture URL in response");
             }
@@ -289,7 +204,110 @@ export default function ChangeProfilePicture() {
         }
     }
 
-    // Functions to handle the AI modal
+    const uploadProfilePicture = async () => {
+        if (!profilePictureUri || !token || !userID) {
+            Alert.alert("Error", "Please select an image first");
+            return;
+        }
+
+        if (profilePictureUri.includes(BACKEND_URL)) {
+            Alert.alert(
+                "Already Uploaded", 
+                "This AI-generated image has already been uploaded to your profile!",
+                [
+                    { 
+                        text: "OK", 
+                        onPress: () => {
+                            router.back();
+                        }
+                    }
+                ]
+            );
+            return;
+        }
+
+        setUploading(true);
+
+        try {
+            const formData = new FormData();
+            
+            const uriParts = profilePictureUri.split('/');
+            const fileName = uriParts[uriParts.length - 1];
+            
+            console.log(`Preparing to upload image: ${fileName} from ${profilePictureUri}`);
+            
+            // @ts-ignore
+            formData.append('profile_picture', {
+                uri: profilePictureUri,
+                type: profilePictureUri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+                name: fileName,
+            });
+
+            console.log("Uploading image...");
+
+            const response = await fetch(`${BACKEND_URL}/api/user/${userID}/profile_picture/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: formData,
+            });
+
+            const responseText = await response.text();
+            console.log("Raw response:", responseText);
+            
+            let responseData;
+            try {
+                responseData = JSON.parse(responseText);
+                console.log("Upload response:", responseData);
+            } catch (e) {
+                console.log("Response is not valid JSON:", e);
+                responseData = { detail: "Server returned an invalid response" };
+            }
+
+            if (!response.ok) {
+                throw new Error(responseData.detail || `Upload failed with status ${response.status}`);
+            }
+
+            await AsyncStorage.setItem('profileImageTimestamp', Date.now().toString());
+            
+            Alert.alert(
+                "Success", 
+                "Profile picture updated successfully!",
+                [
+                    { 
+                        text: "OK", 
+                        onPress: () => {
+                            router.back();
+                        }
+                    }
+                ]
+            );
+        } catch (error: any) {
+            console.error('Upload error:', error);
+            
+            if (error.message.includes("No such file or directory")) {
+                Alert.alert(
+                    "Upload Error", 
+                    "The server had trouble processing your image. Please try selecting a different image format or taking a new photo.",
+                    [
+                        {
+                            text: "Try Again",
+                            onPress: () => {
+                                setProfilePictureUri(null);
+                            }
+                        }
+                    ]
+                );
+            } else {
+                Alert.alert("Error", error.message || "Failed to upload profile picture");
+            }
+        } finally {
+            setUploading(false);
+        }
+    };
+
     const showAiModal = () => setAiModalVisible(true);
     const hideAiModal = () => setAiModalVisible(false);
 
@@ -373,17 +391,25 @@ export default function ChangeProfilePicture() {
                                             {uploading ? (
                                                 <View style={styles.uploadingContainer}>
                                                     <ActivityIndicator color="#FFC107" size="small" />
-                                                    <Text style={styles.uploadingText}>Uploading...</Text>
+                                                    <Text style={styles.uploadingText}>
+                                                        {profilePictureUri.includes(BACKEND_URL) ? "Processing..." : "Uploading..."}
+                                                    </Text>
                                                 </View>
                                             ) : (
                                                 <Button
                                                     mode="contained"
                                                     onPress={uploadProfilePicture}
-                                                    style={styles.uploadButton}
+                                                    style={[
+                                                        styles.uploadButton,
+                                                        profilePictureUri.includes(BACKEND_URL) && styles.disabledButton
+                                                    ]}
                                                     labelStyle={styles.buttonLabel}
                                                     icon="cloud-upload"
+                                                    disabled={profilePictureUri.includes(BACKEND_URL)}
                                                 >
-                                                    Upload Profile Picture
+                                                    {profilePictureUri.includes(BACKEND_URL) 
+                                                        ? "AI Image Already Uploaded" 
+                                                        : "Upload Profile Picture"}
                                                 </Button>
                                             )}
                                         </View>
@@ -693,7 +719,7 @@ const styles = StyleSheet.create({
     },
     closeButton: {
         marginTop: 16,
-        backgroundColor: "#d9534f", // Red background
+        backgroundColor: "#d9534f", 
         borderRadius: 8,
         paddingVertical: 6,
         width: '100%',
@@ -714,5 +740,9 @@ const styles = StyleSheet.create({
         color: '#ff80ab',
         fontSize: 18,
         fontWeight: 'bold',
-    }
+    },
+    disabledButton: {
+        backgroundColor: '#666',
+        opacity: 0.6,
+    },
 });

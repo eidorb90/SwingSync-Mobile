@@ -12,8 +12,8 @@ export default function AuthScreen() {
     const [isSignUp, setIsSignUp] = useState(false);
     const [firstName, setFirstName] = useState("");
     const [lastName, setLastName] = useState("");
-    const [age, setAge] = useState("");
-    const [location, setLocation] = useState("");
+    const [age, setAge] = useState("");  
+    const [location, setLocation] = useState(""); 
     const [email, setEmail] = useState("");
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
@@ -38,8 +38,17 @@ export default function AuthScreen() {
     };
 
     const handleAuth = async () => {
+        if (!username || username.length < 3) {
+            setError("Username must be at least 3 characters long");
+            return;
+        }
+        if (!password || password.length < 8) {
+            setError("Password must be at least 8 characters long");
+            return;
+        }
+
         if (isSignUp) {
-            if (!firstName || !lastName || !email || !username || !password || !confirmPassword) {
+            if (!firstName || !lastName || !email || !confirmPassword) {
                 setError("All fields are required for sign up");
                 return;
             }
@@ -53,44 +62,24 @@ export default function AuthScreen() {
                 setError("Invalid email address");
                 return;
             }
-        } else {
-            if (!username || !password) {
-                setError("Username or Password missing");
-                return;
-            }
-        }
-
-        if (!username || username.length < 3) {
-            setError("Username must be at least 3 characters long");
-            return;
-        }
-        if (password.length < 8) {
-            setError("Password must be at least 8 characters long");
-            return;
         }
 
         setError(null);
-
         if (isSignUp) {
-            const error = await signUp(firstName, lastName, age, location, email, username, password, confirmPassword);
-            if (error) {
-                console.log("Sign up error:", error);
-                setError(error);
+            const errorMsg = await signUp(firstName, lastName, age, location, email, username, password, confirmPassword);
+            if (errorMsg) {
+                setError(errorMsg);
             }
-            } else {
-                console.log("Signing in with", username, password);
-                const error = await signIn(username, password);
-                console.log("Sign in error type:", typeof error, "value:", JSON.stringify(error));
-                
-                if (error) {
-                    console.log("Sign in error:", error);
-                    setError(error);
-                    return;
+        } else {
+            const errorMsg = await signIn(username, password);
+            if (errorMsg) {
+                if (errorMsg === "UNVERIFIED_ACCOUNT") {
+                    setError("Account not verified. Please check your email for verification.");
                 } else {
-                    console.log("Sign in successful");
-                    router.replace("/Home");
+                    setError(errorMsg);
                 }
             }
+        }
     };
 
     if (loading) {
@@ -117,13 +106,13 @@ export default function AuthScreen() {
 
                     {isSignUp && (
                         <>
-                            <TextInput 
-                                label="First Name" 
-                                value={firstName} 
-                                autoCapitalize="none" 
-                                placeholder="Brodie" 
-                                mode="outlined" 
-                                onChangeText={setFirstName} 
+                            <TextInput
+                                label="First Name"
+                                value={firstName}
+                                autoCapitalize="none"
+                                placeholder="Brodie"
+                                mode="outlined"
+                                onChangeText={setFirstName}
                                 style={styles.input}
                                 outlineColor="rgba(255, 255, 255, 0.3)"
                                 activeOutlineColor="#00BFFF"
@@ -131,13 +120,13 @@ export default function AuthScreen() {
                                 placeholderTextColor="rgba(255, 255, 255, 0.5)"
                                 theme={{ colors: { onSurfaceVariant: 'rgba(255, 255, 255, 0.7)' } }}
                             />
-                            <TextInput 
-                                label="Last Name" 
-                                value={lastName} 
-                                autoCapitalize="none" 
-                                placeholder="Rogers" 
-                                mode="outlined" 
-                                onChangeText={setLastName} 
+                            <TextInput
+                                label="Last Name"
+                                value={lastName}
+                                autoCapitalize="none"
+                                placeholder="Rogers"
+                                mode="outlined"
+                                onChangeText={setLastName}
                                 style={styles.input}
                                 outlineColor="rgba(255, 255, 255, 0.3)"
                                 activeOutlineColor="#00BFFF"
@@ -145,14 +134,14 @@ export default function AuthScreen() {
                                 placeholderTextColor="rgba(255, 255, 255, 0.5)"
                                 theme={{ colors: { onSurfaceVariant: 'rgba(255, 255, 255, 0.7)' } }}
                             />
-                            <TextInput 
-                                label="Email" 
-                                value={email} 
-                                autoCapitalize="none" 
-                                placeholder="Brodie@swing-sync.com" 
-                                onChangeText={setEmail} 
-                                keyboardType="email-address" 
-                                mode="outlined" 
+                            <TextInput
+                                label="Email"
+                                value={email}
+                                autoCapitalize="none"
+                                placeholder="Brodie@swing-sync.com"
+                                onChangeText={setEmail}
+                                keyboardType="email-address"
+                                mode="outlined"
                                 style={styles.input}
                                 outlineColor="rgba(255, 255, 255, 0.3)"
                                 activeOutlineColor="#00BFFF"
@@ -163,13 +152,13 @@ export default function AuthScreen() {
                         </>
                     )}
 
-                    <TextInput 
-                        label="Username" 
-                        value={username} 
-                        autoCapitalize="none" 
-                        placeholder="brodi" 
-                        mode="outlined" 
-                        onChangeText={setUsername} 
+                    <TextInput
+                        label="Username"
+                        value={username}
+                        autoCapitalize="none"
+                        placeholder="brodi"
+                        mode="outlined"
+                        onChangeText={setUsername}
                         style={styles.input}
                         outlineColor="rgba(255, 255, 255, 0.3)"
                         activeOutlineColor="#00BFFF"
@@ -177,13 +166,13 @@ export default function AuthScreen() {
                         placeholderTextColor="rgba(255, 255, 255, 0.5)"
                         theme={{ colors: { onSurfaceVariant: 'rgba(255, 255, 255, 0.7)' } }}
                     />
-                    <TextInput 
-                        label="Password" 
-                        value={password} 
-                        secureTextEntry={true} 
-                        autoCapitalize="none" 
-                        mode="outlined" 
-                        onChangeText={setPassword} 
+                    <TextInput
+                        label="Password"
+                        value={password}
+                        secureTextEntry={true}
+                        autoCapitalize="none"
+                        mode="outlined"
+                        onChangeText={setPassword}
                         style={styles.input}
                         outlineColor="rgba(255, 255, 255, 0.3)"
                         activeOutlineColor="#00BFFF"
@@ -193,13 +182,13 @@ export default function AuthScreen() {
                     />
 
                     {isSignUp && (
-                        <TextInput 
-                            label="Confirm Password" 
-                            value={confirmPassword} 
-                            secureTextEntry={true} 
-                            autoCapitalize="none" 
-                            mode="outlined" 
-                            onChangeText={setConfirmPassword} 
+                        <TextInput
+                            label="Confirm Password"
+                            value={confirmPassword}
+                            secureTextEntry={true}
+                            autoCapitalize="none"
+                            mode="outlined"
+                            onChangeText={setConfirmPassword}
                             style={styles.input}
                             outlineColor="rgba(255, 255, 255, 0.3)"
                             activeOutlineColor="#00BFFF"
@@ -256,7 +245,7 @@ const styles = StyleSheet.create({
     },
     button: {
         marginTop: 16,
-        backgroundColor: "#0000FF", 
+        backgroundColor: "#0000FF",
         borderRadius: 8,
         paddingVertical: 6,
     },
@@ -264,10 +253,10 @@ const styles = StyleSheet.create({
         marginTop: 16,
     },
     loadingContainer: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
+        flex: 1,
+        width: '100%',
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
     }
 });

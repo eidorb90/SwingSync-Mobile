@@ -7,27 +7,27 @@ import { useEffect, useState } from "react";
 import { Keyboard, ScrollView, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import { Button, Card, Dialog, Divider, Portal, RadioButton, Switch, Text, TextInput } from "react-native-paper";
 
-
-
-// Define the type for tee info to include an index signature
-interface TeeInfoData {
-  par: number[];
-  yardage: number[];
-}
-
-// Create a type-safe lookup object
-const TEES_INFO: Record<string, TeeInfoData> = {
-  Blue: { par: [4,4,3,5,4,4,3,5,4], yardage: [400,410,180,520,390,430,160,530,410] },
-  White: { par: [4,4,3,5,4,4,3,5,4], yardage: [380,390,160,500,370,410,140,510,390] },
-  Red: { par: [4,4,3,5,4,4,3,5,4], yardage: [350,360,140,470,340,380,120,480,360] },
-  Black: { par: [4,5,3,4,4,5,3,4,4], yardage: [420,530,200,410,400,540,180,420,400] },
-  Masters: { par: [4,5,3,4,4,5,3,4,4], yardage: [445,575,240,350,495,180,450,570,460] },
-  Member: { par: [4,4,3,5,4,4,3,5,4], yardage: [370,390,150,480,360,400,130,500,370] },
-};
-
 const BACKEND_URL = Constants.expoConfig?.extra?.BACKEND_URL;
 
-// Define proper types for course data
+interface HoleDetail {
+  id: number;
+  hole_number: number;
+  par: number;
+  yardage: number;
+  handicap: number;
+}
+
+interface TeeInfo {
+  id: number;
+  tee_name: string;
+  course_rating?: number;
+  slope_rating?: number;
+  bogey_rating?: number;
+  total_yards?: number;
+  par_total?: number;
+  holes: HoleDetail[];
+}
+
 interface Location {
   address?: string;
   city?: string;
@@ -37,60 +37,42 @@ interface Location {
   longitude?: number;
 }
 
-interface TeeInfo {
-  tee_name: string;
-  course_rating?: number;
-  slope_rating?: number;
-  bogey_rating?: number;
-  total_yards?: number;
-  par_total?: number;
-  holes?: any[];
-  // ... other properties
-}
-
 interface Course {
   id: number;
-  name: string;
+  club_name: string;
+  course_name: string;
   location: string | Location;
   tees: {
-    male: Array<string | TeeInfo>;
-    female: Array<string | TeeInfo>;
+    male: TeeInfo[];
+    female: TeeInfo[];
   }
 }
 
-// Update mock courses to match expected structure
-const MOCK_COURSES: Course[] = [
-  { 
-    id: 1, 
-    name: "Pebble Beach", 
-    location: "California, USA", 
-    tees: { male: ["Blue", "White"], female: ["Red"] } 
-  },
-  { 
-    id: 2, 
-    name: "St Andrews", 
-    location: "Scotland, UK", 
-    tees: { male: ["Black", "White"], female: ["Red"] } 
-  },
-  { 
-    id: 3, 
-    name: "Augusta National", 
-    location: "Georgia, USA", 
-    tees: { male: ["Masters", "Member"], female: ["Member"] } 
-  },
-];
+interface LocalHoleScore {
+  hole_id: number;
+  hole_number: number;
+  par: number;
+  yardage: number;
+  strokes: string | null;
+  putts: string | null;
+  penalties: string | null;
+  chips: string | null;
+  approach: string | null;
+  tee: string | null;
+  fairway: boolean;
+  gir: boolean;
+}
 
-// Define draft interface
 interface Draft {
   draft_id: string;
   timestamp: string;
-  selected_course: any;
+  selected_course: Course;
   selected_gender: string;
   selected_tee: string;
-  holes: any[];
-  scores: any[];
+  scores: LocalHoleScore[];
   notes: string;
   current_hole_index: number;
+  user: string;
 }
 
 export default function RoundInput() {
@@ -99,25 +81,23 @@ export default function RoundInput() {
   const [username, setUsername] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Course/tee selection
   const [courseQuery, setCourseQuery] = useState("");
-  const [filteredCourses, setFilteredCourses] = useState(MOCK_COURSES);
-  const [selectedCourse, setSelectedCourse] = useState<any>(null);
+  const [filteredCourses, setFilteredCourses] = useState<Course[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [selectedGender, setSelectedGender] = useState<"male" | "female" | "">("");
   const [selectedTee, setSelectedTee] = useState<string>("");
 
-  // Round state
   const [started, setStarted] = useState(false);
   const [currentHole, setCurrentHole] = useState(0);
-  const [scores, setScores] = useState<any[]>([]);
+  const [scores, setScores] = useState<LocalHoleScore[]>([]);
   const [notes, setNotes] = useState("");
   const [showSummary, setShowSummary] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [alert, setAlert] = useState<{ open: boolean; message: string; severity: "success" | "error" | "info" }>({ open: false, message: "", severity: "info" });
 
-  // Drafts state
   const [holeCountSelection, setHoleCountSelection] = useState<9|18>(18);
-  const [drafts, setDrafts] = useState<Draft[]>([]) || null;
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draftsDialogVisible, setDraftsDialogVisible] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string|null>(null);
 
@@ -148,20 +128,11 @@ export default function RoundInput() {
     }
   };
 
-  // Filter courses as user types
-  useEffect(() => {
-    if (!courseQuery) setFilteredCourses(MOCK_COURSES);
-    else setFilteredCourses(MOCK_COURSES.filter(c => c.name.toLowerCase().includes(courseQuery.toLowerCase())));
-  }, [courseQuery]);
-
-  // Backend-powered course search
-  const [isSearching, setIsSearching] = useState(false);
-
-  // Fetch courses from backend as user types
   useEffect(() => {
     let active = true;
     if (!courseQuery || courseQuery.length < 3) {
       setFilteredCourses([]);
+      setIsSearching(false);
       return;
     }
     setIsSearching(true);
@@ -177,108 +148,107 @@ export default function RoundInput() {
         const data = await res.json();
         if (active) setFilteredCourses(data.courses || []);
       } catch (e) {
+        console.error("Error fetching courses:", e);
         if (active) setFilteredCourses([]);
       } finally {
         if (active) setIsSearching(false);
       }
     };
-    fetchCourses();
+    const handler = setTimeout(() => {
+      fetchCourses();
+    }, 300);
+    
     return () => {
       active = false;
+      clearTimeout(handler);
     };
   }, [courseQuery, token]);
 
-  // Load drafts on component mount
   useEffect(() => {
     if (userID) {
       loadDrafts();
     }
   }, [userID]);
 
-  // Load most recent draft if available
+  const [skipLoadMostRecent, setSkipLoadMostRecent] = useState(false);
+
   useEffect(() => {
-    if (drafts.length > 0 && !currentDraftId) {
-      const mostRecent = drafts.reduce((a, b) => 
+    if (skipLoadMostRecent) return;
+    if (drafts.length > 0 && !currentDraftId && !started) {
+      const mostRecent = drafts.reduce((a, b) =>
         new Date(a.timestamp) > new Date(b.timestamp) ? a : b
       );
       loadDraft(mostRecent);
     }
-  }, [drafts]);
-  
-  // Start round: initialize scores array  
+  }, [drafts, currentDraftId, started, skipLoadMostRecent]);
+
   const handleStart = () => {
-    if (!selectedCourse || !selectedGender || !selectedTee) return;
-    
-    // Try to find the tee object from the course data
-    const tees = selectedCourse?.tees?.[selectedGender] || [];
-    const teeObj = tees.find((t: any) => 
-      typeof t === 'string' ? t === selectedTee : t.tee_name === selectedTee
-    );
-    
-    // Check if we have the tee in our mock data
-    const mockTeeData = TEES_INFO[selectedTee];
-    
-    // Use teeObj's holes if available, otherwise fallback to mock data if we have it
-    let holeData: any[] = [];
-    
-    if (typeof teeObj !== 'string' && teeObj?.holes) {
-      // Use tee data from API, but limit to selected hole count
-      holeData = teeObj.holes.slice(0, holeCountSelection);
-    } else if (mockTeeData) {
-      // Use mock data, but limit to selected hole count
-      holeData = mockTeeData.par.slice(0, holeCountSelection).map((par, i) => ({
-        par, 
-        yardage: mockTeeData.yardage[i]
-      }));
-    } else {
-      // Fallback, using the selected hole count
-      holeData = Array(holeCountSelection).fill(0).map(() => ({
-        par: 4,
-        yardage: 400
-      }));
+    if (!selectedCourse || !selectedGender || !selectedTee) {
+      showAlert("Please select course, gender, and tee.", "error");
+      return;
     }
     
-    // Initialize scores based on actual hole data with "0" for numeric fields
-    setScores(holeData.map((hole: any) => ({
-      strokes: "0",
-      putts: "0",
-      penalties: "0",
-      fairway: false,
-      gir: false,
+    const selectedTeeObj = selectedCourse?.tees?.[selectedGender]?.find(
+      (t: TeeInfo) => t.tee_name === selectedTee
+    );
+    
+    if (!selectedTeeObj || !selectedTeeObj.holes || selectedTeeObj.holes.length === 0) {
+      showAlert("Selected tee has no hole data. Please choose another tee or course.", "error");
+      return;
+    }
+    
+    const holeDataForRound = selectedTeeObj.holes
+      .sort((a, b) => a.hole_number - b.hole_number) 
+      .slice(0, holeCountSelection);
+    
+    if (holeDataForRound.length === 0) {
+      showAlert("No hole data available for the selected tee and hole count.", "error");
+      return;
+    }
+    
+    setScores(holeDataForRound.map((hole: HoleDetail) => ({
+      hole_id: hole.id,
+      hole_number: hole.hole_number,
       par: hole.par,
       yardage: hole.yardage,
+      strokes: null,
+      putts: null,
+      penalties: null,
+      chips: null,
+      approach: null,
+      tee: null,
+      fairway: false,
+      gir: false,
     })));
     
     setCurrentHole(0);
     setStarted(true);
     setShowSummary(false);
+    showAlert("Round started!", "success");
   };
 
-  // Auto-saves the current round progress as a draft
   const autoSaveDraft = async () => {
     if (!selectedCourse) return;
 
-    // Create draft object using fields matching backend model
     const draftData = {
       draft_id: currentDraftId || `draft-${Date.now()}`,
       timestamp: new Date().toISOString(),
       selected_course: selectedCourse,
       selected_gender: selectedGender,
       selected_tee: selectedTee,
-      holes: scores.map((s, i) => ({
-        ...s,
-        hole_id: i + 1,
-      })),
-      scores: scores,
+      scores: scores, 
       notes: notes,
       current_hole_index: currentHole,
-      user: userID, // Add the user ID field as required by backend
+      user: userID, 
     };
-
     try {
       let url = `${BACKEND_URL}/api/drafts/`;
-      let method = currentDraftId ? "PUT" : "POST";
-      
+      let method = "POST";
+
+      if (currentDraftId) {
+          url = `${BACKEND_URL}/api/drafts/${currentDraftId}/`;
+          method = "PUT";
+      }
       const response = await fetch(url, {
         method,
         headers: {
@@ -290,18 +260,16 @@ export default function RoundInput() {
       
       if (!response.ok) {
         console.error(`Auto-save failed with status: ${response.status}`);
-        
+        const errorText = await response.text();
+        console.error("Error response:", errorText);
         try {
-          const errorText = await response.text();
-          console.error("Error response:", errorText);
-          const errorData = errorText ? JSON.parse(errorText) : {};
+          const errorData = JSON.parse(errorText);
           console.error("Error details:", errorData);
         } catch (e) {
-          console.error("Could not parse error response");
+          console.error("Could not parse error response for auto-save");
         }
       } else {
         const data = await response.json();
-        
         if (!currentDraftId) {
           setCurrentDraftId(data.draft_id);
           console.log("Draft saved with ID:", data.draft_id);
@@ -312,19 +280,13 @@ export default function RoundInput() {
     }
   };
 
-  // Handle navigation with auto-save
   const handleNext = async () => {
     if (currentHole < scores.length - 1) {
       await autoSaveDraft();
-      
-      const current = scores[currentHole];
-      console.log(`Score: ${current.strokes }, putts: ${current.putts}, penalties: ${current.penalties} for hole ${currentHole + 1}`);
-      
       setCurrentHole(h => Math.min(h + 1, scores.length - 1));
     }
   };
 
-  // Added proper handlePrev function
   const handlePrev = async () => {
     if (currentHole > 0) {
       await autoSaveDraft();
@@ -332,21 +294,26 @@ export default function RoundInput() {
     }
   };
 
-  // Score input with auto-save - use 0 for empty values
-  const handleScoreChange = (field: string, value: string | boolean) => {
-    // For string fields (numeric inputs), convert empty string to "0"
-    if (typeof value === 'string' && value === '' && 
-        (field === 'strokes' || field === 'putts' || field === 'penalties')) {
-      value = "0";
-    }
-    
+  const handleScoreChange = (field: keyof LocalHoleScore, value: string | boolean) => {
     setScores(prev => {
       const updated = [...prev];
       updated[currentHole] = { ...updated[currentHole], [field]: value };
+      
+      if (field !== 'strokes') {
+        const hole = updated[currentHole];
+        const putts = hole.putts && hole.putts !== "" ? parseInt(hole.putts) : 0;
+        const penalties = hole.penalties && hole.penalties !== "" ? parseInt(hole.penalties) : 0;
+        const chips = hole.chips && hole.chips !== "" ? parseInt(hole.chips) : 0;
+        const approach = hole.approach && hole.approach !== "" ? parseInt(hole.approach) : 0;
+        const teeShots = 1; 
+        
+        const totalStrokes = teeShots + putts + penalties + chips + approach;
+        updated[currentHole].strokes = totalStrokes > 0 ? totalStrokes.toString() : null;
+      }
+      
       return updated;
     });
     
-    // Auto-save after a brief delay when user changes data
     if (autoSaveTimeout) {
       clearTimeout(autoSaveTimeout);
     }
@@ -356,32 +323,27 @@ export default function RoundInput() {
     setAutoSaveTimeout(timeout);
   };
 
-  // Fix draft save to show success alert
   const saveDraft = async () => {
     if (!selectedCourse) {
       setAlert({
         open: true,
         message: "Please select a course first",
-        severity: "error"
+        severity: "error" 
       });
       return;
     }
     
     setIsSaving(true);
     
-    // Match field names with the backend model
     const draftData = {
       draft_id: currentDraftId || `draft-${Date.now()}`,
       timestamp: new Date().toISOString(),
       selected_course: selectedCourse,
       selected_gender: selectedGender,
       selected_tee: selectedTee,
-      holes: scores.map((s, i) => ({
-        ...s,
-        hole_id: i + 1,
-      })),
-      scores,
-      notes,
+      holes: scores.map(s => ({ ...s })),
+      scores: scores,
+      notes: notes,
       current_hole_index: currentHole,
       user: userID,
     };
@@ -404,7 +366,7 @@ export default function RoundInput() {
         const responseText = await response.text();
         responseData = responseText ? JSON.parse(responseText) : {};
       } catch (e) {
-        console.error("Failed to parse response:", e);
+        console.error("Failed to parse response for saveDraft:", e);
         responseData = {};
       }
       
@@ -413,18 +375,13 @@ export default function RoundInput() {
         throw new Error(responseData.error || responseData.detail || "Failed to save draft");
       }
       
-      // Add success alert
-      setAlert({
-        open: true,
-        message: "Draft saved successfully!",
-        severity: "success"
-      });
+      showAlert("Draft saved successfully!", "success");
       
       if (!currentDraftId && responseData.draft_id) {
         setCurrentDraftId(responseData.draft_id);
       }
       
-      await loadDrafts(); // Reload drafts list
+      await loadDrafts();
       
     } catch (error: any) {
       setAlert({
@@ -437,7 +394,6 @@ export default function RoundInput() {
     }
   };
 
-  // Add this function to clear alerts after a delay
   const showAlert = (message: string, severity: "success" | "error" | "info") => {
     setAlert({
       open: true,
@@ -445,13 +401,11 @@ export default function RoundInput() {
       severity
     });
     
-    // Auto-hide alert after 3 seconds
     setTimeout(() => {
       setAlert(prev => ({ ...prev, open: false }));
     }, 3000);
   };
 
-  // Fix delete draft to handle async deletion properly
   const deleteDraft = async (draftId: string) => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/drafts/${draftId}/`, {
@@ -461,23 +415,37 @@ export default function RoundInput() {
         },
       });
       
-      if (!response.ok) throw new Error("Failed to delete draft");
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to delete draft:", response.status, errorText);
+        throw new Error("Failed to delete draft");
+      }
       
       showAlert("Draft deleted successfully!", "success");
       
-      // This needs to be a separate action, not within the success callback
       if (currentDraftId === draftId) {
-        setCurrentDraftId(null);
+        clearDraftState();     
       }
-      
-      // Load drafts after deletion is done
       await loadDrafts();
-    } catch (error) {
-      showAlert("Failed to delete draft", "error");
+    } catch (error: any) {
+      showAlert(`Failed to delete draft: ${error.message || error}`, "error");
     }
   };
 
-  // Define the loadDrafts function
+  const clearDraftState = () => {
+    setCurrentDraftId(null);
+    setStarted(false);
+    setCurrentHole(0);
+    setScores([]);
+    setSelectedCourse(null);
+    setCourseQuery("");
+    setSelectedGender("");
+    setSelectedTee("");
+    setNotes("");
+    setShowSummary(false);
+    setFilteredCourses([]);   
+  };
+
   const loadDrafts = async () => {
     if (!token || !userID) return;
     
@@ -488,50 +456,47 @@ export default function RoundInput() {
         },
       });
       
-      if (!response.ok) throw new Error("Failed to fetch drafts");
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to fetch drafts:", response.status, errorText);
+        throw new Error("Failed to fetch drafts");
+      }
       
       const data = await response.json();
       setDrafts(data);
-    } catch (error) {
-      showAlert("No drafts found", "info");
+    } catch (error: any) {
+      if (error.message && error.message.includes("Failed to fetch drafts")) {
+        showAlert("Failed to load drafts. Please try again.", "error");
+      } else {
+        showAlert("No drafts found", "info");
+      }
+      setDrafts([]);
     }
   };
 
-  // Define the formatDate function
   const formatDate = (timestamp: string) => {
     return new Date(timestamp).toLocaleString();
   };
 
-  // Define handleSave function
-  const handleSave = async () => {
-    try {
-      // Check if scores have been entered before proceeding
-      const hasScores = scores.some(s => s.strokes && parseInt(s.strokes) > 0);
-      if (!hasScores) {
-        showAlert("Please enter scores for at least one hole.", "error");
-        return;
-      }
-      
-      await autoSaveDraft(); // Save one last time
-      const success = await handleBackendSave(); // Actual backend save
-      if (success) {
-        setShowSummary(true);
-      }
-    } catch (error) {
-      console.error("Failed to save round:", error);
-      showAlert("Failed to save round. Please try again.", "error");
-    }
-    handleFinish();
+  const handleSave = () => {
+    setShowSummary(true);
   };
 
-  // Backend save logic with proper error handling
+  const handleSummaryFinish = async () => {
+    setIsSaving(true);
+    const success = await handleBackendSave();
+    setIsSaving(false);
+    if (success) {
+      router.push('/ViewRounds');
+    }
+  };
+
   const handleBackendSave = async () => {
     if (!selectedCourse || !selectedTee || !scores.length) {
       showAlert("Please complete all fields.", "error");
       return false;
     }
     
-    // Check if scores have been entered
     const hasScores = scores.some(s => s.strokes && parseInt(s.strokes) > 0);
     if (!hasScores) {
       showAlert("Please enter scores for at least one hole.", "error");
@@ -542,23 +507,36 @@ export default function RoundInput() {
     console.log("Starting save of round to backend...");
     
     try {
-      // Prepare payload with empty values defaulting to 0
       const payload = {
         course_id: selectedCourse.id,
         tee_name: selectedTee,
         gender: selectedGender,
         notes,
-        hole_scores: scores.map((s, i) => ({
-          hole_id: i + 1,
-          strokes: s.strokes ? parseInt(s.strokes) : 0, 
-          putts: s.putts ? parseInt(s.putts) : 0,
-          penalties: s.penalties ? parseInt(s.penalties) : 0,
-          fairway_hit: !!s.fairway,
-          green_in_regulation: !!s.gir,
-        })),
+        hole_scores: scores.map((s, i) => {
+          const putts     = s.putts     ? parseInt(s.putts)     : 0;
+          const penalties = s.penalties ? parseInt(s.penalties) : 0;
+          const chips     = s.chips     ? parseInt(s.chips)     : 0;
+          const approach  = s.approach  ? parseInt(s.approach)  : 0;
+          const strokes   = s.strokes 
+            ? parseInt(s.strokes) 
+            : 1 + putts + penalties + chips + approach;
+          return {
+            hole_id:            i + 1,     
+            par:                s.par,        
+            yardage:            s.yardage,    
+            strokes,
+            putts,
+            penalties,
+            chip_shots:         chips,
+            approach_shots:     approach,
+            tee_shot:           1,
+            fairway_hit:        !!s.fairway,
+            green_in_regulation: !!s.gir,
+          };
+        }),
       };
       
-      console.log("Saving round with payload:", JSON.stringify(payload).substring(0, 100) + "...");
+      console.log("Saving round with payload:", JSON.stringify(payload, null, 2));
       
       const roundEndpoint = `${BACKEND_URL}/api/rounds/`;
       const res = await fetch(roundEndpoint, {
@@ -585,17 +563,28 @@ export default function RoundInput() {
         throw new Error(responseData.detail || responseData.message || `Server returned ${res.status}`);
       }
       
-      // If we successfully saved, clean up draft
       if (currentDraftId) {
         try {
-          await deleteDraft(currentDraftId);
-          console.log("Draft deleted after successful round save");
+          const deleteRes = await fetch(`${BACKEND_URL}/api/drafts/${currentDraftId}/`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (deleteRes.ok) {
+            console.log("Draft deleted after successful round save");
+            setCurrentDraftId(null);
+            setDrafts((prev: Draft[]) => prev.filter((d: Draft) => d.draft_id !== currentDraftId));
+          } else {
+            console.error("Failed to delete draft after saving round:", deleteRes.status);
+          }
         } catch (e) {
           console.error("Failed to delete draft after saving round:", e);
         }
       }
       
       showAlert("Round saved successfully!", "success");
+      handleFinish();
       return true;
     } catch (error: any) {
       console.error("Error saving round:", error);
@@ -606,7 +595,6 @@ export default function RoundInput() {
     }
   };
   
-  // Handle finishing a round (reset state)
   const handleFinish = () => {
     setStarted(false);
     setShowSummary(false);
@@ -617,25 +605,25 @@ export default function RoundInput() {
     setNotes("");
     setCourseQuery("");
     setCurrentDraftId(null);
-    
-    // If successfully saved, navigate to the home screen or show confirmation
+    setFilteredCourses([]);
     showAlert("Round completed!", "success");
   };
 
-  // Load a draft function (if it's also missing)
   const loadDraft = (draft: Draft) => {
     if (!draft) return;
     
-    // Process the draft scores to ensure all numeric fields have string values
     const processedScores = draft.scores?.map(score => ({
       ...score,
-      strokes: score.strokes?.toString() || "0",
-      putts: score.putts?.toString() || "0",
-      penalties: score.penalties?.toString() || "0"
+      strokes: score.strokes !== null && score.strokes !== undefined ? String(score.strokes) : null,
+      putts: score.putts !== null && score.putts !== undefined ? String(score.putts) : null,
+      penalties: score.penalties !== null && score.penalties !== undefined ? String(score.penalties) : null,
+      chips: score.chips !== null && score.chips !== undefined ? String(score.chips) : null,
+      approach: score.approach !== null && score.approach !== undefined ? String(score.approach) : null,
+      tee: score.tee !== null && score.tee !== undefined ? String(score.tee) : null
     })) || [];
     
     setSelectedCourse(draft.selected_course);
-    setCourseQuery(draft.selected_course?.name || "");
+    setCourseQuery(draft.selected_course?.course_name || "");
     setSelectedGender(draft.selected_gender as "" | "male" | "female");
     setSelectedTee(draft.selected_tee);
     setScores(processedScores);
@@ -649,9 +637,14 @@ export default function RoundInput() {
     showAlert("Draft loaded successfully!", "success");
   };
 
-  // Fix the summary screen to calculate totals correctly
   const totalScore = scores.reduce((sum, s) => {
-    const strokes = s.strokes && s.strokes !== "" ? parseInt(s.strokes) : 0;
+    const putts    = s.putts    && s.putts    !== "" ? parseInt(s.putts)    : 0;
+    const penalties= s.penalties&& s.penalties!== "" ? parseInt(s.penalties): 0;
+    const chips    = s.chips    && s.chips    !== "" ? parseInt(s.chips)    : 0;
+    const approach = s.approach && s.approach !== "" ? parseInt(s.approach) : 0;
+    const strokes  = s.strokes && s.strokes !== "" 
+      ? parseInt(s.strokes) 
+      : 1 + putts + penalties + chips + approach;
     return sum + strokes;
   }, 0);
   
@@ -664,29 +657,81 @@ export default function RoundInput() {
     const penalties = s.penalties && s.penalties !== "" ? parseInt(s.penalties) : 0;
     return sum + penalties;
   }, 0);
+
+  const totalChips = scores.reduce((sum, s) => {
+    const chips = s.chips && s.chips !== "" ? parseInt(s.chips) : 0;
+    return sum + chips;
+  }, 0);
+
+
+  const totalApproach = scores.reduce((sum, s) => {
+    const approach = s.approach && s.approach !== "" ? parseInt(s.approach) : 0;
+    return sum + approach;
+  }, 0);
+
+  const totalTee = scores.length; 
   
   const fairwaysHit = scores.filter(s => s.fairway).length;
   const girs = scores.filter(s => s.gir).length;
 
-  // Update the summary screen to include a save button if needed
-  if (showSummary && started) {
+  if (showSummary) {
     return (
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <View style={styles.outerContainer}>
           <Card style={styles.card}>
-            <Card.Title title="Round Summary" titleStyle={styles.cardTitle} />
-            <Card.Content>
-              <Text style={styles.summaryText}>Course: <Text style={{fontWeight: "bold"}}>{selectedCourse?.name}</Text></Text>
-              <Text style={styles.summaryText}>Tee: <Text style={{fontWeight: "bold"}}>{selectedTee}</Text></Text>
-              <Text style={styles.summaryText}>Gender: <Text style={{fontWeight: "bold"}}>{selectedGender}</Text></Text>
-              <Text style={styles.summaryText}>Total Score: <Text style={{fontWeight: "bold"}}>{totalScore}</Text></Text>
-              <Text style={styles.summaryText}>Putts: <Text style={{fontWeight: "bold"}}>{totalPutts}</Text></Text>
-              <Text style={styles.summaryText}>Penalties: <Text style={{fontWeight: "bold"}}>{totalPenalties}</Text></Text>
-              <Text style={styles.summaryText}>Fairways Hit: <Text style={{fontWeight: "bold"}}>{fairwaysHit}</Text></Text>
-              <Text style={styles.summaryText}>GIRs: <Text style={{fontWeight: "bold"}}>{girs}</Text></Text>
-              <Divider style={{marginVertical: 10, backgroundColor: "#fff"}} />
-              
-              {/* Notes field for the entire round */}
+            <Card.Title
+              title="Round Summary"
+              titleStyle={styles.summaryTitle}
+              subtitle={new Date().toLocaleDateString()}
+              subtitleStyle={styles.summarySubtitle}
+            />
+            <Divider style={styles.summaryDivider} />
+            <Card.Content style={styles.summaryContent}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Course</Text>
+                <Text style={styles.summaryValue}>{selectedCourse?.course_name || "Unknown"}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Tee</Text>
+                <Text style={styles.summaryValue}>{selectedTee}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Gender</Text>
+                <Text style={styles.summaryValue}>{selectedGender}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Total Score</Text>
+                <Text style={styles.summaryValue}>{totalScore}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Putts</Text>
+                <Text style={styles.summaryValue}>{totalPutts}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Penalties</Text>
+                <Text style={styles.summaryValue}>{totalPenalties}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Chip Shots</Text>
+                <Text style={styles.summaryValue}>{totalChips}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Approach Shots</Text>
+                <Text style={styles.summaryValue}>{totalApproach}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Tee Shots</Text>
+                <Text style={styles.summaryValue}>{totalTee}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Fairways Hit</Text>
+                <Text style={styles.summaryValue}>{fairwaysHit}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>GIRs</Text>
+                <Text style={styles.summaryValue}>{girs}</Text>
+              </View>
+
               <TextInput
                 label="Round Notes"
                 mode="outlined"
@@ -703,15 +748,31 @@ export default function RoundInput() {
                 placeholder="Weather, course conditions, memorable shots..."
               />
             </Card.Content>
-            <Card.Actions style={{justifyContent: "center", flexDirection: 'column', gap: 10}}>
+            <Card.Actions style={{ justifyContent: "center", flexDirection: 'column', gap: 10 }}>
+              <Button
+                mode="outlined"
+                style={styles.button}
+                onPress={() => setShowSummary(false)}     
+                textColor="#00BFFF"
+              >
+                Back to Edit
+              </Button>
               <Button 
                 mode="contained" 
                 style={styles.button}
-                onPress={handleBackendSave}
+                onPress={handleSummaryFinish}
                 loading={isSaving}
                 disabled={isSaving}
               >
-                Finish Round
+                Save & Finish Round
+              </Button>
+              <Button 
+                mode="outlined" 
+                style={styles.button}
+                onPress={() => router.push('/ViewRounds')}
+                textColor="#00BFFF"
+              >
+                View My Rounds
               </Button>
             </Card.Actions>
           </Card>
@@ -727,113 +788,255 @@ export default function RoundInput() {
 
   if (started) {
     const s = scores[currentHole] || {};
+    const currentStrokes = (() => {
+      const tee_shots = 1
+      const putts = s.putts && s.putts !== "" ? parseInt(s.putts) : 0;
+      const penalties = s.penalties && s.penalties !== "" ? parseInt(s.penalties) : 0;
+      const chips = s.chips && s.chips !== "" ? parseInt(s.chips) : 0;
+      const approach = s.approach && s.approach !== "" ? parseInt(s.approach) : 0;
+      return tee_shots + putts + penalties + chips + approach;
+    })();
+    
+    const scoreToPar = currentStrokes - (s.par || 0);
+    const getScoreColors = () => {
+      if (currentStrokes === 0) {
+        return {
+          backgroundColor: 'rgba(0, 191, 255, 0.12)',
+          borderColor: 'rgba(0, 191, 255, 0.2)',
+          textColor: '#fff',
+          textShadow: 'rgba(0, 191, 255, 0.5)'
+        };
+      }
+      
+      if (scoreToPar < 0) {
+        return {
+          backgroundColor: 'rgba(76, 175, 80, 0.15)',
+          borderColor: 'rgba(76, 175, 80, 0.3)',
+          textColor: '#4CAF50',
+          textShadow: 'rgba(76, 175, 80, 0.6)'
+        };
+      } else if (scoreToPar === 0) {
+        return {
+          backgroundColor: 'rgba(0, 191, 255, 0.12)',
+          borderColor: 'rgba(0, 191, 255, 0.2)',
+          textColor: '#00BFFF',
+          textShadow: 'rgba(0, 191, 255, 0.5)'
+        };
+      } else if (scoreToPar === 1) {
+        return {
+          backgroundColor: 'rgba(255, 193, 7, 0.12)',
+          borderColor: 'rgba(255, 193, 7, 0.25)',
+          textColor: '#FFC107',
+          textShadow: 'rgba(255, 193, 7, 0.5)'
+        };
+      } else {
+        return {
+          backgroundColor: 'rgba(244, 67, 54, 0.12)',
+          borderColor: 'rgba(244, 67, 54, 0.25)',
+          textColor: '#F44336',
+          textShadow: 'rgba(244, 67, 54, 0.5)'
+        };
+      }
+    };
+    
+    const scoreColors = getScoreColors();
+    
     return (
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <View style={styles.outerContainer}>
-          <Card style={styles.card}>
-            <Card.Title 
-              title={`Hole ${currentHole + 1} / ${scores.length}`} 
-              titleStyle={styles.cardTitle}
-            />
-            <Card.Content>
-              <Text style={styles.summaryText}>Par: {s.par} | Yards: {s.yardage}</Text>
-              <TextInput
-                label="Strokes"
-                mode="outlined"
-                value={s.strokes?.toString() ?? ""}
-                onChangeText={v => handleScoreChange("strokes", v.replace(/[^0-9]/g, ""))}
-                keyboardType="numeric"
-                style={styles.input}
-                outlineColor="rgba(255,255,255,0.3)"
-                activeOutlineColor="#00BFFF"
-                textColor="#FFFFFF"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-                theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
-                placeholder="0"
-              />
-              <TextInput
-                label="Putts"
-                mode="outlined"
-                value={s.putts?.toString() ?? ""}
-                onChangeText={v => handleScoreChange("putts", v.replace(/[^0-9]/g, ""))}
-                keyboardType="numeric"
-                style={styles.input}
-                outlineColor="rgba(255,255,255,0.3)"
-                activeOutlineColor="#00BFFF"
-                textColor="#FFFFFF"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-                theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
-                placeholder="0"
-              />
-              <TextInput
-                label="Penalties"
-                mode="outlined"
-                value={s.penalties?.toString() ?? ""}
-                onChangeText={v => handleScoreChange("penalties", v.replace(/[^0-9]/g, ""))}
-                keyboardType="numeric"
-                style={styles.input}
-                outlineColor="rgba(255,255,255,0.3)"
-                activeOutlineColor="#00BFFF"
-                textColor="#FFFFFF"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-                theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
-                placeholder="0"
-              />
-              <View style={styles.switchRow}>
-                {s.par > 3 && (
-                    <>
-                    <Text style={styles.switchLabel}>Fairway Hit</Text>
-                    <Switch value={!!s.fairway} onValueChange={v => handleScoreChange("fairway", v)} color="#00BFFF" />
-                    </>
-                )}
-                <Text style={styles.switchLabel}>GIR</Text>
-                <Switch value={!!s.gir} onValueChange={v => handleScoreChange("gir", v)} color="#00BFFF" />
-                
+          <Card style={styles.compactCard}>
+            <View style={styles.compactHeader}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSkipLoadMostRecent(true);
+                  clearDraftState();
+                  showAlert("Round unloaded", "info");
+                }}
+                style={styles.exitButtonAbsolute}
+              >
+                <MaterialCommunityIcons name="close" size={20} color="#ff6b6b" />
+              </TouchableOpacity>
+              <View style={styles.headerTextContainer}>
+                <Text style={styles.cardTitle}>Hole {s.hole_number || currentHole + 1}</Text>
+                <Text style={styles.cardSubtitle}>Par {s.par} • {s.yardage} yards</Text>
               </View>
-                            
-            </Card.Content>
-            <Card.Actions style={{justifyContent: "space-between"}}>
-              <Button mode="outlined" style={styles.buttonNav} onPress={handlePrev} disabled={currentHole === 0}>Prev</Button>
-              {currentHole < scores.length - 1 ? (
-                <Button mode="contained" style={styles.buttonNav} onPress={handleNext}>Next</Button>
-              ) : (
-                <Button
-                  mode="contained" 
-                  style={styles.buttonNav}
-                  onPress={handleSave}
-                  loading={isSaving}
-                  disabled={isSaving}
+            </View>
+            
+            <Card.Content style={styles.compactContent}>
+              <View style={styles.scoreHeader}>
+                <View style={[
+                  styles.scoreDisplayCard,
+                  {
+                    backgroundColor: scoreColors.backgroundColor,
+                    borderColor: scoreColors.borderColor,
+                  }
+                ]}>
+                  <Text style={styles.scoreDisplayLabel}>Total Strokes</Text>
+                  <Text style={[
+                    styles.scoreDisplayValue,
+                    {
+                      color: scoreColors.textColor,
+                      textShadowColor: scoreColors.textShadow,
+                    }
+                  ]}>
+                    {currentStrokes}
+                  </Text>
+                  {currentStrokes > 0 && (
+                    <Text style={[
+                      styles.scoreToPar,
+                      { color: scoreColors.textColor }
+                    ]}>
+                      {scoreToPar === 0 ? 'Even' : scoreToPar > 0 ? `+${scoreToPar}` : `${scoreToPar}`}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.progressSection}>
+                  <Text style={styles.progressText}>Hole {currentHole + 1} of {scores.length}</Text>
+                  <View style={styles.progressBar}>
+                    <View style={[styles.progressFill, { width: `${((currentHole + 1) / scores.length) * 100}%` }]} />
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.primaryStatsSection}>
+                <Text style={styles.sectionTitle}>Shot Details</Text>
+                <View style={styles.primaryStatsGrid}>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statLabel}>Putts</Text>
+                    <TextInput
+                      mode="outlined"
+                      value={s.putts?.toString() ?? ""}
+                      onChangeText={v => handleScoreChange("putts", v.replace(/[^0-9]/g, ""))}
+                      keyboardType="numeric"
+                      style={styles.statInput}
+                      outlineColor="rgba(255,255,255,0.2)"
+                      activeOutlineColor="#00BFFF"
+                      textColor="#FFFFFF"
+                      placeholder="0"
+                      contentStyle={styles.inputContent}
+                      dense
+                    />
+                  </View>
+
+                  <View style={styles.statCard}>
+                    <Text style={styles.statLabel}>Approach</Text>
+                    <TextInput
+                      mode="outlined"
+                      value={s.approach?.toString() ?? ""}
+                      onChangeText={v => handleScoreChange("approach", v.replace(/[^0-9]/g, ""))}
+                      keyboardType="numeric"
+                      style={styles.statInput}
+                      outlineColor="rgba(255,255,255,0.2)"
+                      activeOutlineColor="#00BFFF"
+                      textColor="#FFFFFF"
+                      placeholder="0"
+                      contentStyle={styles.inputContent}
+                      dense
+                    />
+                  </View>
+
+                  <View style={styles.statCard}>
+                    <Text style={styles.statLabel}>Chips</Text>
+                    <TextInput
+                      mode="outlined"
+                      value={s.chips?.toString() ?? ""}
+                      onChangeText={v => handleScoreChange("chips", v.replace(/[^0-9]/g, ""))}
+                      keyboardType="numeric"
+                      style={styles.statInput}
+                      outlineColor="rgba(255,255,255,0.2)"
+                      activeOutlineColor="#00BFFF"
+                      textColor="#FFFFFF"
+                      placeholder="0"
+                      contentStyle={styles.inputContent}
+                      dense
+                    />
+                  </View>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statLabel}>Penalties</Text>
+                    <TextInput
+                      mode="outlined"
+                      value={s.penalties?.toString() ?? ""}
+                      onChangeText={v => handleScoreChange("penalties", v.replace(/[^0-9]/g, ""))}
+                      keyboardType="numeric"
+                      style={[styles.statInput, styles.penaltyInput]}
+                      outlineColor="rgba(255,107,107,0.3)"
+                      activeOutlineColor="#FF6B6B"
+                      textColor="#FFFFFF"
+                      placeholder="0"
+                      contentStyle={styles.inputContent}
+                      dense
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.performanceSection}>
+                <Text style={styles.sectionTitle}>Performance</Text>
+                <View style={styles.switchContainer}>
+                  {s.par > 3 && (
+                    <View style={styles.switchItem}>
+                      <Text style={styles.performanceLabel}>Fairway Hit</Text>
+                      <Switch 
+                        value={!!s.fairway} 
+                        onValueChange={v => handleScoreChange("fairway", v)} 
+                        color="#4CAF50"
+                      />
+                    </View>
+                  )}
+                  <View style={styles.switchItem}>
+                    <Text style={styles.performanceLabel}>Green in Regulation                </Text>
+                    <Switch 
+                      value={!!s.gir} 
+                      onValueChange={v => handleScoreChange("gir", v)} 
+                      color="#4CAF50"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.navigationSection}>
+                <Button 
+                  mode="outlined" 
+                  style={[styles.navButton, styles.prevButton]} 
+                  onPress={handlePrev} 
+                  disabled={currentHole === 0}
+                  icon="chevron-left"
+                  textColor={currentHole === 0 ? "#666" : "#00BFFF"}
                 >
-                  Save
+                  Previous
                 </Button>
-              )}
-            </Card.Actions>
+                
+                {currentHole < scores.length - 1 ? (
+                  <Button 
+                    mode="contained" 
+                    style={[styles.navButton, styles.nextButton]} 
+                    onPress={handleNext}
+                    icon="chevron-right"
+                    contentStyle={{ flexDirection: 'row-reverse' }}
+                  >
+                    Next Hole
+                  </Button>
+                ) : (
+                  <Button
+                    mode="contained"
+                    style={[styles.navButton, styles.finishButton]}
+                    onPress={handleSave} 
+                    loading={isSaving}
+                    disabled={isSaving}
+                    icon="check"
+                  >
+                    Finish Round
+                  </Button>
+                )}
+              </View>
+            </Card.Content>
           </Card>
-          <Button 
-            mode="outlined" 
-            onPress={() => {
-              // Reset all round state
-              setStarted(false);
-              setCurrentHole(0);
-              setScores([]);
-              setSelectedCourse(null);
-              setSelectedGender("");
-              setSelectedTee("");
-              setCourseQuery("");
-              setNotes("");
-              setCurrentDraftId(null);
-              setShowSummary(false);
-              
-              showAlert("Round unloaded", "info");
-            }}
-            style={{ marginTop: 10, borderColor: "#ff6b6b" }}
-            textColor="#ff6b6b"
-          >
-            Unload Round
-          </Button>
+          
           {alert.open && (
             <View style={styles.snackbar}>
-              <Text style={{ color: alert.severity === "error" ? "#ff6b6b" : "#51cf66" }}>{alert.message}</Text>
+              <Text style={{ color: alert.severity === "error" ? "#ff6b6b" : "#51cf66" }}>
+                {alert.message}
+              </Text>
             </View>
           )}
         </View>
@@ -841,7 +1044,6 @@ export default function RoundInput() {
     );
   }
 
-  // Initial form with 9/18 hole selection
   return (
     <ScrollView 
       contentContainerStyle={styles.outerContainer}
@@ -849,7 +1051,6 @@ export default function RoundInput() {
     >
       <Text variant="headlineSmall" style={styles.title}>Record a New Round</Text>
       
-      {/* Header with drafts button */}
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle}>Course Details</Text>
         <Button 
@@ -879,15 +1080,14 @@ export default function RoundInput() {
           />
           
           {filteredCourses.length > 0 ? (
-            filteredCourses.map((c: any) => (
+            filteredCourses.map((c: Course) => (
               <Button
                 key={c.id}
                 mode={selectedCourse?.id === c.id ? "contained" : "outlined"}
                 style={styles.courseButton}
                 onPress={() => setSelectedCourse(c)}
               >
-                {/* Handle location object or string appropriately */}
-                {c.name} <Text style={{color: "#aaa"}}>
+                {c.course_name} <Text style={{color: "#aaa"}}>
                   {typeof c.location === 'string' 
                     ? `(${c.location})` 
                     : `(${[c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ')})`}
@@ -930,7 +1130,7 @@ export default function RoundInput() {
                 <RadioButton
                   value="female"
                   color="#FF69B4"
-                  uncheckedColor='#000'
+                  uncheckedColor='#fff'
                   status={selectedGender === "female" ? "checked" : "unchecked"}
                 />
                 <Text style={[
@@ -945,19 +1145,19 @@ export default function RoundInput() {
           
           <Text style={styles.label}>Tee</Text>
           <View style={styles.teeRow}>
-            {(selectedCourse?.tees?.[selectedGender] || []).map((tee: string | TeeInfo, index: any) => {
-              // Extract tee name and handle both string and object formats
-              const teeName = typeof tee === 'string' ? tee : tee.tee_name;
-              
+            {((selectedGender === "male" || selectedGender === "female") 
+              ? selectedCourse?.tees?.[selectedGender] || [] 
+              : []
+            ).map((tee: TeeInfo, index: number) => {
               return (
                 <Button
-                  key={index}
-                  mode={selectedTee === teeName ? "contained" : "outlined"}
+                  key={tee.id}
+                  mode={selectedTee === tee.tee_name ? "contained" : "outlined"}
                   style={styles.teeButton}
-                  onPress={() => setSelectedTee(teeName)}
+                  onPress={() => setSelectedTee(tee.tee_name)}
                 >
-                  {teeName}
-                  {typeof tee !== 'string' && tee.course_rating && (
+                  {tee.tee_name}
+                  {tee.course_rating && (
                     <Text style={{fontSize: 12, color: "#aaa"}}> (CR: {tee.course_rating})</Text>
                   )}
                 </Button>
@@ -965,7 +1165,6 @@ export default function RoundInput() {
             })}
           </View>
           
-          {/* 9/18 hole selection */}
           <Text style={styles.label}>Number of Holes</Text>
           <View style={styles.holeSelectRow}>
             <Button
@@ -1002,7 +1201,7 @@ export default function RoundInput() {
             mode="contained"
             style={[styles.button, {flex: 2, backgroundColor: "#0000FF"}]}
             onPress={handleStart}
-            disabled={!selectedCourse || !selectedGender || !selectedTee}
+            disabled={!selectedCourse || !selectedGender || !selectedTee || loading}
           >
             Start Round
           </Button>
@@ -1020,7 +1219,6 @@ export default function RoundInput() {
         </Card.Actions>
       </Card>
       
-      {/* Drafts Dialog */}
       <Portal>
         <Dialog visible={draftsDialogVisible} onDismiss={() => setDraftsDialogVisible(false)} style={{backgroundColor: 'rgba(0,0,38,0.95)'}}>
           <Dialog.Title style={{color: '#fff'}}>Saved Drafts</Dialog.Title>
@@ -1031,7 +1229,7 @@ export default function RoundInput() {
               drafts.map((draft) => (
                 <Card key={draft.draft_id} style={styles.draftCard}>
                   <Card.Title 
-                    title={draft.selected_course?.name || "Unknown Course"} 
+                    title={draft.selected_course?.course_name || draft.selected_course?.club_name || "Unknown Course"} 
                     subtitle={`Last saved: ${formatDate(draft.timestamp)}`}
                     titleStyle={{color: '#fff'}}
                     subtitleStyle={{color: '#ccc'}}
@@ -1061,38 +1259,228 @@ export default function RoundInput() {
 
 const styles = StyleSheet.create({
   outerContainer: {
-    flexGrow: 1,
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 30,
-    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     backgroundColor: 'transparent',
   },
   card: {
-    width: '100%',  // Changed from fixed 360px to responsive 100%
-    maxWidth: 400,  // Added max-width for larger screens
+    width: '100%',
+    maxWidth: 450,
     backgroundColor: 'rgba(0,0,38,0.95)',
-    borderRadius: 16,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingVertical: 16,
     paddingHorizontal: 0,
-    marginTop: 10,
-    marginBottom: 30,
+    marginTop: 8,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 6,
   },
   cardTitle: {
     color: "#fff",
     fontWeight: "bold",
-    fontSize: 22,
+    fontSize: 18,
     textAlign: "center",
   },
+  cardSubtitle: {
+    color: "#aaa",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 2,
+  },
   title: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "bold",
     color: "#fff",
-    marginBottom: 18,
+    marginBottom: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    textShadowRadius: 2,
     textAlign: 'center',
+  },
+  compactCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: 'rgba(0,0,38,0.96)',
+    borderRadius: 16,
+    marginVertical: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  compactContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  scoreHeader: {
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 8,
+  },
+  scoreDisplayCard: {
+    backgroundColor: 'rgba(0, 191, 255, 0.12)',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 191, 255, 0.2)',
+    minWidth: 120,
+  },
+  scoreDisplayLabel: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 11,
+    marginBottom: 4,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  scoreDisplayValue: {
+    color: "#fff",
+    fontSize: 28,
+    fontWeight: "bold",
+    textShadowColor: 'rgba(0, 191, 255, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  scoreToPar: {
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 2,
+    opacity: 0.9,
+    letterSpacing: 0.3,
+  },
+  progressSection: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  progressText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  progressBar: {
+    width: '80%',
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#00BFFF',
+    borderRadius: 2,
+  },
+  primaryStatsSection: {
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 12,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  primaryStatsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  statCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 8,
+    padding: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  statLabel: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 10,
+    marginBottom: 6,
+    fontWeight: "600",
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  statInput: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 6,
+    width: '100%',
+    height: 36,
+  },
+  penaltyInput: {
+    backgroundColor: 'rgba(255,107,107,0.08)',
+  },
+  inputContent: {
+    paddingHorizontal: 6,
+  },
+  performanceSection: {
+    marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  switchContainer: {
+    gap: 8,
+  },
+  switchItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+  },
+  performanceLabel: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  navigationSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  navButton: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 2,
+    height: 36,
+  },
+  prevButton: {
+    borderColor: 'rgba(0, 191, 255, 0.5)',
+  },
+  nextButton: {
+    backgroundColor: '#00BFFF',
+  },
+  finishButton: {
+    backgroundColor: "#4CAF50",
+  },
+  exitButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 107, 107, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.3)',
   },
   input: {
     marginBottom: 12,
@@ -1102,13 +1490,14 @@ const styles = StyleSheet.create({
   },
   label: {
     color: "#fff",
-    marginBottom: 4,
-    fontSize: 16,
+    marginBottom: 6,
+    fontSize: 14,
     textAlign: 'left',
     marginTop: 8,
+    fontWeight: '500',
   },
   courseButton: {
-    marginVertical: 2,
+    marginVertical: 3,
     borderRadius: 8,
     width: '100%',
     justifyContent: 'flex-start',
@@ -1116,74 +1505,45 @@ const styles = StyleSheet.create({
   radioRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
-    gap: 8,
+    marginBottom: 10,
+    gap: 16,
   },
   radioLabel: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 14,
     marginRight: 16,
+    fontWeight: '500',
   },
   teeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
     marginBottom: 12,
   },
   teeButton: {
-    marginHorizontal: 4,
+    marginHorizontal: 2,
     borderRadius: 8,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   button: {
-    marginTop: 10,
-    borderRadius: 8,
+    marginTop: 8,
+    borderRadius: 10,
     paddingVertical: 6,
     width: '100%',
   },
-  buttonNav: {
-    minWidth: 100,
-    marginHorizontal: 8,
-    marginVertical: 8,
-    borderRadius: 8,
-  },
   summaryText: {
     color: "#fff",
-    fontSize: 16,
-    marginBottom: 4,
-    flexShrink: 1,  // Added to ensure text can shrink if needed
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-    marginTop: 8,
-    flexWrap: 'wrap',  // Added to ensure content wraps if needed
-  },
-  switchLabel: {
-    color: "#fff",
-    fontSize: 15,
-    marginHorizontal: 8,
-    opacity: 0.8,
-  },
-  snackbar: {
-    position: "absolute",
-    bottom: 30,
-    left: 20,
-    right: 20,
-    backgroundColor: "rgba(0,0,0,0.85)",
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
-    zIndex: 100,
+    fontSize: 14,
+    marginBottom: 6,
+    flexShrink: 1,
+    lineHeight: 20,
   },
   headerRow: {
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
     paddingHorizontal: 4,
   },
   headerTitle: {
@@ -1196,13 +1556,78 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     marginVertical: 8,
+    gap: 8,
   },
   holeSelectButton: {
     flex: 1,
-    marginHorizontal: 4,
+    borderRadius: 8,
   },
   draftCard: {
-    marginVertical: 8,
+    marginVertical: 6,
     backgroundColor: 'rgba(30,30,60,0.85)',
+    borderRadius: 10,
+  },
+  snackbar: {
+    position: "absolute",
+    bottom: 20,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    borderRadius: 10,
+    padding: 12,
+    alignItems: "center",
+    zIndex: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  compactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    paddingVertical: 8,
+  },
+  exitButtonAbsolute: {
+    position: 'absolute',
+    left: 8,
+    top: 4,
+  },
+  headerTextContainer: {
+    alignItems: 'center',
+  },
+  summaryTitle: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  summarySubtitle: {
+    color: "#ccc",
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  summaryDivider: {
+    backgroundColor: "rgba(255,255,255,0.2)",
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  summaryContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginVertical: 4,
+  },
+  summaryLabel: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 14,
+  },
+  summaryValue: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

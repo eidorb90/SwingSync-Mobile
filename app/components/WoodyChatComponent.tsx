@@ -33,10 +33,62 @@ export default function WoodyChatComponent() {
   const [videoData, setVideoData] = useState<string | null>(null);
   const [videoName, setVideoName] = useState<string | null>(null);
   const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [usesBeforeAd, setUsesBeforeAd] = useState(3);
 
   useEffect(() => {
     fetchTokenAndSetUserID();
+    loadUsageCount();
   }, []);
+
+  const loadUsageCount = async () => {
+    try {
+      const count = await AsyncStorage.getItem('chatUsageCount');
+      if (count) {
+        setUsesBeforeAd(parseInt(count));
+      }
+    } catch (error) {
+      console.error('Error loading usage count:', error);
+    }
+  };
+
+  const saveUsageCount = async (count: number) => {
+    try {
+      await AsyncStorage.setItem('chatUsageCount', count.toString());
+    } catch (error) {
+      console.error('Error saving usage count:', error);
+    }
+  };
+
+  const showAdPrompt = () => {
+    Alert.alert(
+      'Continue Chatting?',
+      'You\'ve used your free messages! Watch a short ad to continue chatting with Woody.',
+      [
+        {
+          text: 'Maybe Later',
+          style: 'cancel',
+        },
+        {
+          text: 'Continue',
+          onPress: () => {
+            Alert.alert(
+              'Ad Watched!',
+              'Thanks for watching! You can now continue chatting with Woody.',
+              [
+                {
+                  text: 'Continue',
+                  onPress: () => {
+                    setUsesBeforeAd(3);
+                    saveUsageCount(3);
+                  }
+                }
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
 
   useEffect(() => {
     if (scrollViewRef.current) {
@@ -74,7 +126,6 @@ export default function WoodyChatComponent() {
     try {
       setUploadingVideo(true);
       
-      // Request permissions
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to make this work!');
@@ -90,7 +141,6 @@ export default function WoodyChatComponent() {
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         
-        // Convert video to base64
         const base64 = await FileSystem.readAsStringAsync(asset.uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
@@ -113,11 +163,20 @@ export default function WoodyChatComponent() {
   const handleSendMessage = async () => {
     if (!input.trim() || loading) return;
 
+    if (usesBeforeAd === 0) {
+      showAdPrompt();
+      return;
+    }
+
     setError(null);
     const userMessage = { text: input, sender: 'user', timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     setLoading(true);
+
+    const newCount = usesBeforeAd - 1;
+    setUsesBeforeAd(newCount);
+    saveUsageCount(newCount);
 
     try {
         const payload: any = { 
@@ -209,6 +268,11 @@ export default function WoodyChatComponent() {
       <View style={styles.header}>
         <Text style={styles.title}>Woody Chat</Text>
         <Text style={styles.subtitle}>Ask Woody anything about your golf game!</Text>
+        {usesBeforeAd <= 1 && (
+          <Text style={styles.usageWarning}>
+            {usesBeforeAd === 0 ? 'Watch ad to continue' : `${usesBeforeAd} message${usesBeforeAd === 1 ? '' : 's'} remaining`}
+          </Text>
+        )}
       </View>
       <View style={styles.chatContainer}>
         <ScrollView
@@ -264,47 +328,66 @@ export default function WoodyChatComponent() {
           </TouchableOpacity>
         </View>
       )}
-      <View style={styles.inputBar}>
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          placeholder="Type your message..."
-          placeholderTextColor="rgba(255,255,255,0.5)"
-          style={styles.input}
-          mode="outlined"
-          outlineColor="rgba(255,255,255,0.3)"
-          activeOutlineColor="#00BFFF"
-          textColor="#FFFFFF"
-          theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
-          onSubmitEditing={handleSendMessage}
-          editable={!loading}
-          returnKeyType="send"
-        />
-        <TouchableOpacity
-          style={styles.sendButton}
-          onPress={handleSendMessage}
-          disabled={loading || !input.trim()}
-        >
-          <Ionicons name="send" size={22} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.sendButton, { marginLeft: 8, backgroundColor: addVideo ? "#FF0000" : (addRounds ? "#00FF00" : "#0000FF") }]}
-          disabled={addVideo}
-          onPress={() => setAddRounds(!addRounds)}
-        >
-          <Text style={{ color: '#fff', fontSize: 12 }}>Rounds</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.sendButton, {marginLeft: 8, backgroundColor: uploadingVideo ? "#FFA500" : (addVideo ? "#00FF00" : "#0000FF")}]} 
-          onPress={pickVideo}
-          disabled={uploadingVideo}
-        >
-          {uploadingVideo ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <Entypo name="attachment" size={24} color="white" />
-          )}
-        </TouchableOpacity>
+      
+      <View style={styles.inputContainer}>
+        {/* Feature buttons row */}
+        <View style={styles.featureButtonsRow}>
+          <TouchableOpacity 
+            style={[styles.featureButton, { backgroundColor: addVideo ? "#FF0000" : (addRounds ? "#00AA00" : "rgba(255,255,255,0.15)") }]}
+            disabled={addVideo}
+            onPress={() => setAddRounds(!addRounds)}
+          >
+            <Ionicons name="golf" size={18} color="#fff" />
+            <Text style={styles.featureButtonText}>Rounds</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.featureButton, { backgroundColor: uploadingVideo ? "#FFA500" : (addVideo ? "#00AA00" : "rgba(255,255,255,0.15)") }]} 
+            onPress={pickVideo}
+            disabled={uploadingVideo}
+          >
+            {uploadingVideo ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <>
+                <Entypo name="attachment" size={18} color="white" />
+                <Text style={styles.featureButtonText}>Video</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+        
+        {/* Main input row */}
+        <View style={styles.inputRow}>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder="Type your message..."
+            placeholderTextColor="rgba(255,255,255,0.5)"
+            style={styles.input}
+            mode="outlined"
+            outlineColor="rgba(255,255,255,0.3)"
+            activeOutlineColor="#00BFFF"
+            textColor="#FFFFFF"
+            theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
+            onSubmitEditing={handleSendMessage}
+            editable={!loading}
+            returnKeyType="send"
+            multiline
+            maxLength={1000}
+          />
+          <TouchableOpacity
+            style={[styles.sendButton, { opacity: (loading || !input.trim()) ? 0.5 : 1 }]}
+            onPress={handleSendMessage}
+            disabled={loading || !input.trim()}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Ionicons name="send" size={20} color="#fff" />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -411,28 +494,60 @@ const styles = StyleSheet.create({
         marginRight: 8,
         alignSelf: 'flex-start',
     },
-    inputBar: {
+    inputContainer: {
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        paddingTop: 12,
+        paddingBottom: Platform.OS === "ios" ? 34 : 16,
+        paddingHorizontal: 16,
+        marginBottom: 56,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255,255,255,0.1)',
+    },
+    featureButtonsRow: {
+        flexDirection: 'row',
+        marginBottom: 12,
+        gap: 12,
+    },
+    featureButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingBottom: Platform.OS === "ios" ? 24 : 10,
-        backgroundColor: 'rgba(0,0,0,0.15)',
-        marginBottom: 56,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        gap: 6,
+        minWidth: 80,
+        justifyContent: 'center',
+    },
+    featureButtonText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    inputRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        gap: 12,
     },
     input: {
         flex: 1,
-        marginRight: 8,
-        backgroundColor: 'rgba(255,255,255,0.12)',
-        borderRadius: 8,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        borderRadius: 24,
         fontSize: 16,
+        maxHeight: 100,
     },
     sendButton: {
-        backgroundColor: "#0000FF",
-        borderRadius: 8,
-        padding: 10,
+        backgroundColor: "#00BFFF",
+        borderRadius: 24,
+        padding: 12,
         justifyContent: 'center',
         alignItems: 'center',
-        opacity: 1,
+        width: 48,
+        height: 48,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 5,
     },
     error: {
         color: "#ff6b6b",
@@ -461,18 +576,23 @@ const styles = StyleSheet.create({
         fontSize: 14,
         flex: 1,
     },
+    usageWarning: {
+        color: '#FFD700',
+        fontSize: 12,
+        marginTop: 4,
+        textAlign: 'center',
+        fontWeight: '500',
+    },
 });
 
 const markdownStyles = StyleSheet.create({
-    // General body text for Markdown content inside a bubble
     body: {
-        color: '#fff', // White text for bot messages
+        color: '#fff',
         fontSize: 16,
         lineHeight: 22,
         flexShrink: 1,
-        flexWrap: 'wrap', // Explicitly enables text wrapping within Text components
+        flexWrap: 'wrap',
     },
-    // Headings
     heading1: {
         color: '#fff',
         fontSize: 20,
@@ -540,8 +660,8 @@ const markdownStyles = StyleSheet.create({
         marginTop: 5,
         marginBottom: 5,
         flexShrink: 1,
-        flexWrap: 'wrap', // Important for code blocks
-        overflow: 'hidden', // Helps if code is extremely long
+        flexWrap: 'wrap', 
+        overflow: 'hidden', 
     },
     inlineCode: {
         backgroundColor: 'rgba(0,0,0,0.2)',

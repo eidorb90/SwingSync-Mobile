@@ -46,10 +46,10 @@
       "typedRoutes": true
     },
     "extra": {
-      "BACKEND_URL": "http://api.swing-sync.com",
+      "BACKEND_URL": "https://api.swing-sync.com",
       "router": {},
       "eas": {
-        "projectId": "ee3838ec-f372-487a-b19b-c716e644ae77"
+        "projectId": "ee3838ec-f372-487a-b19b-c716a644ae77"
       }
     },
     "owner": "eidorb"

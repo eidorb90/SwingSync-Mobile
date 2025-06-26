@@ -25,7 +25,6 @@ export default function SettingsScreen() {
   const [lastName, setLastName] = useState<string>("");
   const [changePFP, setChangePFP] = useState<boolean>(false);
   const [imageTimestamp, setImageTimestamp] = useState<string>(Date.now().toString());
-  // Add state for force refresh
   const [forceRefresh, setForceRefresh] = useState(0);
 
   const router = useRouter();
@@ -47,7 +46,6 @@ export default function SettingsScreen() {
   
   useFocusEffect(
     useCallback(() => {
-      // Always get the latest timestamp from AsyncStorage on focus
       const refreshProfilePicture = async () => {
         const latestTimestamp = await AsyncStorage.getItem('profileImageTimestamp');
         const ts = latestTimestamp || Date.now().toString();
@@ -125,17 +123,14 @@ export default function SettingsScreen() {
     }
   }, [userID, token]);
 
-  // Completely revised profile picture fetching with cache busting
   const fetchUserProfilePicture = async () => {
     if (!userID || !token) return;
     
     try {
-      // Add a cache busting timestamp to the API request
       const cacheBust = new Date().getTime();
       const response = await fetch(`${BACKEND_URL}/api/user/${userID}/profile_picture/?cache=${cacheBust}`, {
         headers: {
           Authorization: `Bearer ${token}`,
-          // Explicitly request no caching
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0',
@@ -145,7 +140,6 @@ export default function SettingsScreen() {
       if (response.ok) {
         const data = await response.json();
         if (data.profile_picture) {
-          // Force React Native to see this as a new image by adding cacheBust
           const imageUri = data.profile_picture.includes('?') 
             ? `${data.profile_picture}&_cache=${cacheBust}` 
             : `${data.profile_picture}?_cache=${cacheBust}`;
@@ -153,15 +147,12 @@ export default function SettingsScreen() {
           console.log("Setting profile picture with cache busting:", imageUri);
           setProfilePicture(imageUri);
           
-          // Force a component update
           setForceRefresh(prev => prev + 1);
         } else {
-          // Clear the profile picture if none is returned
           setProfilePicture(null);
         }
       } else {
         console.error("Error response from profile picture API:", response.status);
-        // Clear profile picture on error
         setProfilePicture(null);
       }
     } catch (error) {
@@ -224,7 +215,6 @@ export default function SettingsScreen() {
 
               <Text style={styles.title}>{firstName} {lastName}</Text>
               <Text style={styles.username}>@{username}</Text>
-              {/* Removed the separate Change Profile Picture button */}
             </View>
             
             <Divider style={styles.divider} />

@@ -8,8 +8,8 @@ const theme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    primary: "#0000FF", // This matches your button color
-    accent: "#00BFFF", // This matches your active outline color
+    primary: "#0000FF", 
+    accent: "#00BFFF", 
   },
 };
 

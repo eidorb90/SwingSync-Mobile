@@ -20,7 +20,6 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
-  // Replace imageTimestamp with forceRefresh for more explicit naming
   const [forceRefresh, setForceRefresh] = useState(0);
 
   const fetchUserData = useCallback(async () => {
@@ -47,7 +46,6 @@ export default function HomeScreen() {
       setError(null);
       setSuccess("Data updated");
       
-      // Clear success message after 2 seconds
       setTimeout(() => {
         setSuccess(null);
       }, 2000);
@@ -60,7 +58,6 @@ export default function HomeScreen() {
     }
   }, [userID, username]);
 
-  // Updated profile picture fetching with cache busting
   const fetchUserProfilePicture = useCallback(async () => {
     if (userID === null) {
       setError("User ID is null");
@@ -68,7 +65,6 @@ export default function HomeScreen() {
     }
     const token = await AsyncStorage.getItem("authToken");
     try {
-      // Add cache busting to prevent stale image data
       const cacheBust = Date.now();
       const response = await fetch(`${BACKEND_URL}/api/user/${userID}/profile_picture/?cache=${cacheBust}`, {
         headers: {
@@ -84,7 +80,6 @@ export default function HomeScreen() {
       }
       const data = await response.json();
       if (data.profile_picture) {
-        // Add cache-busting parameter to force fresh image load
         const imageUri = data.profile_picture.includes('?') 
           ? `${data.profile_picture}&_cache=${cacheBust}` 
           : `${data.profile_picture}?_cache=${cacheBust}`;
@@ -166,10 +161,10 @@ export default function HomeScreen() {
                 </Text>
                 {profilePicture ? (
                   <Image 
-                    key={`profile-${forceRefresh}`} // Key for forcing re-render
+                    key={`profile-${forceRefresh}`}  
                     source={{ 
                       uri: profilePicture,
-                      cache: 'reload' // Disable caching
+                      cache: 'reload' 
                     }}
                     style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 10 }}
                     resizeMode="cover"

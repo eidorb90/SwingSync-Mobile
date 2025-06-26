@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 export default function Index() {
   const { isAuthenticated, needsVerification } = useAuth();
   
-  // Redirect based on auth state
   if (needsVerification) {
     return <Redirect href="/verify" />;
   } else if (isAuthenticated) {
