@@ -40,13 +40,15 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "BACKEND_URL": "https://api.swing-sync.com",
+      "ver" : "1.0.1",
       "router": {},
       "eas": {
         "projectId": "ee3838ec-f372-487a-b19b-c716a644ae77"

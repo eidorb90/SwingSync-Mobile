@@ -266,23 +266,31 @@ export default function WoodyChatComponent() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }} keyboardVerticalOffset={80}>
       <StatusBar style="light" backgroundColor="#000026" />
       <View style={styles.header}>
-        <Text style={styles.title}>Woody Chat</Text>
-        <Text style={styles.subtitle}>Ask Woody anything about your golf game!</Text>
-        {usesBeforeAd <= 1 && (
-          <Text style={styles.usageWarning}>
-            {usesBeforeAd === 0 ? 'Watch ad to continue' : `${usesBeforeAd} message${usesBeforeAd === 1 ? '' : 's'} remaining`}
-          </Text>
-        )}
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>Woody Chat</Text>
+          <Text style={styles.subtitle}>Professional golf insights at your fingertips</Text>
+          {usesBeforeAd <= 1 && (
+            <View style={styles.usageWarningContainer}>
+              <Ionicons name="information-circle" size={14} color="#FFD700" style={{marginRight: 4}} />
+              <Text style={styles.usageWarning}>
+                {usesBeforeAd === 0 ? 'Watch ad to continue' : `${usesBeforeAd} message${usesBeforeAd === 1 ? '' : 's'} remaining`}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
       <View style={styles.chatContainer}>
         <ScrollView
           ref={scrollViewRef}
           style={styles.messagesScroll}
-          contentContainerStyle={{ paddingBottom: 20 }}
+          contentContainerStyle={styles.messagesContent}
           showsVerticalScrollIndicator={false}
         >
           {messages.length === 0 && (
-            <Text style={styles.emptyText}>Say hi to Woody and ask your golf questions!</Text>
+            <View style={styles.emptyStateContainer}>
+              <Ionicons name="golf-outline" size={50} color="rgba(255,255,255,0.4)" />
+              <Text style={styles.emptyText}>Ask Woody about your golf game, techniques, or equipment</Text>
+            </View>
           )}
           {messages.map((msg, idx) => (
             <View
@@ -303,7 +311,9 @@ export default function WoodyChatComponent() {
                 </View>
               ) : (
                 <View style={styles.row}>
-                  <Ionicons name="golf" size={24} color="#fff" style={styles.woodyIcon} />
+                  <View style={styles.woodyIconContainer}>
+                    <Ionicons name="flag" size={18} color="#fff" style={styles.woodyIcon} />
+                  </View>
                   <Markdown style={markdownStyles}>{msg.text}</Markdown>
                 </View>
               )}
@@ -312,37 +322,60 @@ export default function WoodyChatComponent() {
           {loading && (
             <View style={[styles.messageBubble, styles.botBubble]}>
               <View style={styles.row}>
-                <Ionicons name="golf" size={24} color="#fff" style={styles.woodyIcon} />
-                <ActivityIndicator color="#00BFFF" size="small" style={{ marginLeft: 8 }} />
+                <View style={styles.woodyIconContainer}>
+                  <Ionicons name="flag" size={18} color="#fff" style={styles.woodyIcon} />
+                </View>
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator color="#00BFFF" size="small" />
+                  <Text style={styles.loadingText}>Analyzing...</Text>
+                </View>
               </View>
             </View>
           )}
         </ScrollView>
       </View>
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={16} color="#ff6b6b" style={{marginRight: 6}} />
+          <Text style={styles.error}>{error}</Text>
+        </View>
+      )}
       {addVideo && videoName && (
         <View style={styles.videoPreview}>
-          <Text style={styles.videoPreviewText}>Video ready: {videoName}</Text>
-          <TouchableOpacity onPress={() => { setAddVideo(false); setVideoData(null); setVideoName(null); }}>
+          <View style={styles.videoPreviewContent}>
+            <Ionicons name="videocam" size={16} color="#fff" style={{marginRight: 8}} />
+            <Text style={styles.videoPreviewText}>{videoName}</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.videoPreviewClose} 
+            onPress={() => { setAddVideo(false); setVideoData(null); setVideoName(null); }}
+          >
             <Ionicons name="close-circle" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       )}
       
       <View style={styles.inputContainer}>
-        {/* Feature buttons row */}
         <View style={styles.featureButtonsRow}>
           <TouchableOpacity 
-            style={[styles.featureButton, { backgroundColor: addVideo ? "#FF0000" : (addRounds ? "#00AA00" : "rgba(255,255,255,0.15)") }]}
+            style={[
+              styles.featureButton, 
+              addRounds && styles.featureButtonActive,
+              addVideo && styles.featureButtonDisabled
+            ]}
             disabled={addVideo}
             onPress={() => setAddRounds(!addRounds)}
           >
             <Ionicons name="golf" size={18} color="#fff" />
-            <Text style={styles.featureButtonText}>Rounds</Text>
+            <Text style={styles.featureButtonText}>Include Rounds</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.featureButton, { backgroundColor: uploadingVideo ? "#FFA500" : (addVideo ? "#00AA00" : "rgba(255,255,255,0.15)") }]} 
+            style={[
+              styles.featureButton, 
+              uploadingVideo && styles.featureButtonUploading,
+              addVideo && styles.featureButtonActive
+            ]} 
             onPress={pickVideo}
             disabled={uploadingVideo}
           >
@@ -351,13 +384,12 @@ export default function WoodyChatComponent() {
             ) : (
               <>
                 <Entypo name="attachment" size={18} color="white" />
-                <Text style={styles.featureButtonText}>Video</Text>
+                <Text style={styles.featureButtonText}>Attach Video</Text>
               </>
             )}
           </TouchableOpacity>
         </View>
         
-        {/* Main input row */}
         <View style={styles.inputRow}>
           <TextInput
             value={input}
@@ -377,7 +409,10 @@ export default function WoodyChatComponent() {
             maxLength={1000}
           />
           <TouchableOpacity
-            style={[styles.sendButton, { opacity: (loading || !input.trim()) ? 0.5 : 1 }]}
+            style={[
+              styles.sendButton, 
+              { opacity: (loading || !input.trim()) ? 0.5 : 1 }
+            ]}
             onPress={handleSendMessage}
             disabled={loading || !input.trim()}
           >
@@ -400,59 +435,89 @@ const styles = StyleSheet.create({
         height: '100%',
     },
     header: {
-        paddingTop: 40,
-        paddingBottom: 10,
+        paddingTop: Platform.OS === "ios" ? 44 : 40,
+        paddingBottom: 16,
         alignItems: 'center',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255,255,255,0.1)',
+    },
+    headerContent: {
+        alignItems: 'center',
+        width: '100%',
     },
     title: {
-        fontSize: 26,
-        fontWeight: "bold",
+        fontSize: 28,
+        fontWeight: "700",
         color: "#fff",
-        marginBottom: 4,
+        marginBottom: 6,
+        letterSpacing: 0.5,
         textShadowColor: 'rgba(0,0,0,0.3)',
         textShadowOffset: { width: 1, height: 1 },
         textShadowRadius: 3,
     },
     subtitle: {
         fontSize: 15,
-        color: 'rgba(255,255,255,0.7)',
-        marginBottom: 6,
+        color: 'rgba(255,255,255,0.8)',
+        marginBottom: 4,
+        fontWeight: '400',
+        letterSpacing: 0.2,
         textAlign: 'center',
+    },
+    usageWarningContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+        backgroundColor: 'rgba(255, 215, 0, 0.1)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
     },
     chatContainer: {
         flex: 1,
-        paddingHorizontal: 10,
-        paddingBottom: 10,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
     },
     messagesScroll: {
         flex: 1,
     },
+    messagesContent: {
+        paddingBottom: 20,
+        flexGrow: 1,
+    },
+    emptyStateContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 32,
+        paddingVertical: 60,
+    },
     emptyText: {
-        color: 'rgba(255,255,255,0.5)',
+        color: 'rgba(255,255,255,0.6)',
         textAlign: 'center',
-        marginTop: 30,
+        marginTop: 16,
         fontSize: 16,
+        lineHeight: 24,
     },
     messageBubble: {
-        marginVertical: 6,
-        maxWidth: '95%',
-        borderRadius: 16,
-        padding: 12,
+        marginVertical: 8,
+        maxWidth: '90%',
+        borderRadius: 18,
+        padding: 14,
         flexDirection: 'row',
         alignItems: 'flex-start',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 2,
-        elevation: 1,
+        shadowOpacity: 0.12,
+        shadowRadius: 3,
+        elevation: 2,
     },
     userBubble: {
-        backgroundColor: '#00BFFF',
+        backgroundColor: '#1E88E5',
         alignSelf: 'flex-end',
         borderTopRightRadius: 4,
     },
     botBubble: {
-        backgroundColor: '#1E90FF',
+        backgroundColor: '#1A237E',
         alignSelf: 'flex-start',
         borderTopLeftRadius: 4,
         overflow: 'hidden',
@@ -469,6 +534,7 @@ const styles = StyleSheet.create({
         marginRight: 8,
         flexShrink: 1,
         flex: 1,
+        lineHeight: 22,
     },
     botText: {
         color: '#fff',
@@ -476,27 +542,49 @@ const styles = StyleSheet.create({
         marginLeft: 8,
         flexShrink: 1,
         flex: 1,
+        lineHeight: 22,
     },
     avatar: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        marginRight: 8,
-        marginLeft: 4,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        marginRight: 4,
+        marginLeft: 8,
         borderWidth: 1,
         borderColor: '#fff',
         alignSelf: 'flex-end',
     },
-    woodyIcon: {
+    woodyIconContainer: {
         backgroundColor: '#000080',
-        borderRadius: 16,
-        padding: 2,
-        marginRight: 8,
+        borderRadius: 14,
+        padding: 4,
+        marginRight: 10,
         alignSelf: 'flex-start',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 1,
+        elevation: 2,
+        width: 28,
+        height: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    woodyIcon: {
+        alignSelf: 'center',
+    },
+    loadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    loadingText: {
+        color: 'rgba(255,255,255,0.7)',
+        marginLeft: 8,
+        fontSize: 14,
     },
     inputContainer: {
-        backgroundColor: 'rgba(0,0,0,0.2)',
-        paddingTop: 12,
+        backgroundColor: 'rgba(0,0,0,0.25)',
+        paddingTop: 14,
         paddingBottom: Platform.OS === "ios" ? 34 : 16,
         paddingHorizontal: 16,
         marginBottom: 56,
@@ -505,22 +593,33 @@ const styles = StyleSheet.create({
     },
     featureButtonsRow: {
         flexDirection: 'row',
-        marginBottom: 12,
+        marginBottom: 14,
         gap: 12,
     },
     featureButton: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingVertical: 8,
+        paddingVertical: 9,
         borderRadius: 20,
-        gap: 6,
+        gap: 8,
         minWidth: 80,
         justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.15)',
+    },
+    featureButtonActive: {
+        backgroundColor: "#1E88E5",
+    },
+    featureButtonDisabled: {
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        opacity: 0.5,
+    },
+    featureButtonUploading: {
+        backgroundColor: "#FFA500",
     },
     featureButtonText: {
         color: '#fff',
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: '500',
     },
     inputRow: {
@@ -536,7 +635,7 @@ const styles = StyleSheet.create({
         maxHeight: 100,
     },
     sendButton: {
-        backgroundColor: "#00BFFF",
+        backgroundColor: "#1E88E5",
         borderRadius: 24,
         padding: 12,
         justifyContent: 'center',
@@ -549,38 +648,50 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
         elevation: 5,
     },
-    error: {
-        color: "#ff6b6b",
+    errorContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
         backgroundColor: 'rgba(255, 107, 107, 0.15)',
-        padding: 8,
+        padding: 10,
         borderRadius: 8,
         marginHorizontal: 16,
-        marginBottom: 8,
+        marginBottom: 12,
+        justifyContent: 'center',
+    },
+    error: {
+        color: "#ff6b6b",
         textAlign: 'center',
-        fontSize: 15,
+        fontSize: 14,
+        flex: 1,
     },
     videoPreview: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: 'rgba(0, 191, 255, 0.2)',
-        padding: 10,
+        backgroundColor: 'rgba(30, 136, 229, 0.2)',
+        padding: 12,
         marginHorizontal: 16,
-        marginBottom: 8,
-        borderRadius: 8,
+        marginBottom: 12,
+        borderRadius: 10,
         borderWidth: 1,
-        borderColor: '#00BFFF',
+        borderColor: '#1E88E5',
+    },
+    videoPreviewContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
     },
     videoPreviewText: {
         color: '#fff',
         fontSize: 14,
-        flex: 1,
+        fontWeight: '500',
+    },
+    videoPreviewClose: {
+        padding: 4,
     },
     usageWarning: {
         color: '#FFD700',
         fontSize: 12,
-        marginTop: 4,
-        textAlign: 'center',
         fontWeight: '500',
     },
 });
@@ -589,7 +700,7 @@ const markdownStyles = StyleSheet.create({
     body: {
         color: '#fff',
         fontSize: 16,
-        lineHeight: 22,
+        lineHeight: 24,
         flexShrink: 1,
         flexWrap: 'wrap',
     },
@@ -597,17 +708,20 @@ const markdownStyles = StyleSheet.create({
         color: '#fff',
         fontSize: 20,
         fontWeight: 'bold',
-        marginTop: 10,
-        marginBottom: 5,
+        marginTop: 14,
+        marginBottom: 8,
         flexShrink: 1,
         flexWrap: 'wrap',
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255,255,255,0.2)',
+        paddingBottom: 6,
     },
     heading2: {
         color: '#fff',
         fontSize: 18,
         fontWeight: 'bold',
-        marginTop: 8,
-        marginBottom: 4,
+        marginTop: 12,
+        marginBottom: 6,
         flexShrink: 1,
         flexWrap: 'wrap',
     },
@@ -615,70 +729,78 @@ const markdownStyles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: 'bold',
-        marginTop: 6,
-        marginBottom: 3,
+        marginTop: 10,
+        marginBottom: 5,
         flexShrink: 1,
         flexWrap: 'wrap',
     },
     strong: {
         fontWeight: 'bold',
+        color: '#90CAF9',
     },
     em: {
         fontStyle: 'italic',
+        color: '#E1F5FE',
     },
     link: {
-        color: '#ADD8E6',
+        color: '#82B1FF',
         textDecorationLine: 'underline',
     },
     listUnorderedItem: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        marginBottom: 4,
+        marginBottom: 6,
         flexShrink: 1,
         flexWrap: 'wrap',
     },
     listOrderedItem: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        marginBottom: 4,
+        marginBottom: 6,
         flexShrink: 1,
         flexWrap: 'wrap',
     },
     listItem: {
         color: '#fff',
         fontSize: 16,
-        lineHeight: 22,
+        lineHeight: 24,
         flexShrink: 1,
         flexWrap: 'wrap',
     },
     code: {
-        backgroundColor: 'rgba(0,0,0,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.3)',
         borderRadius: 6,
-        padding: 8,
+        padding: 10,
         fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
         color: '#ADFF2F',
-        marginTop: 5,
-        marginBottom: 5,
+        marginTop: 8,
+        marginBottom: 8,
         flexShrink: 1,
-        flexWrap: 'wrap', 
-        overflow: 'hidden', 
+        flexWrap: 'wrap',
+        overflow: 'hidden',
     },
     inlineCode: {
-        backgroundColor: 'rgba(0,0,0,0.2)',
+        backgroundColor: 'rgba(0,0,0,0.3)',
         borderRadius: 4,
-        paddingHorizontal: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
         fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
         color: '#ADFF2F',
     },
     blockquote: {
         borderLeftColor: '#7B68EE',
         borderLeftWidth: 4,
-        paddingLeft: 10,
+        paddingLeft: 12,
         opacity: 0.9,
-        marginTop: 5,
-        marginBottom: 5,
+        marginTop: 8,
+        marginBottom: 8,
         flexShrink: 1,
         flexWrap: 'wrap',
+        backgroundColor: 'rgba(0,0,0,0.1)',
+        paddingTop: 8,
+        paddingBottom: 8,
+        paddingRight: 8,
+        borderRadius: 4,
     },
     table: {
         borderWidth: 1,

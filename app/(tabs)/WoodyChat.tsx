@@ -4,7 +4,12 @@ import WoodyChatComponent from '../components/WoodyChatComponent';
 
 export default function WoodyChat() {
     return (
-        <LinearGradient style={styles.background} colors={['#000026', "#000080", '#000026']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <LinearGradient 
+            style={styles.background} 
+            colors={['#000033', '#000080', '#000033']} 
+            start={{ x: 0, y: 0 }} 
+            end={{ x: 1, y: 1 }}
+        >
             <View style={styles.container}>
                 <WoodyChatComponent/>
             </View>
@@ -18,7 +23,6 @@ const styles = StyleSheet.create({
     },
     container: {
         flex: 1,
-        padding: 20,
     },
     title: {
         fontSize: 28,

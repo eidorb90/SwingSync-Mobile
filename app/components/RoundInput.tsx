@@ -99,6 +99,8 @@ export default function RoundInput() {
   const [holeCountSelection, setHoleCountSelection] = useState<9|18>(18);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draftsDialogVisible, setDraftsDialogVisible] = useState(false);
+  const [teeDialogVisible, setTeeDialogVisible] = useState(false);
+  const [courseDialogVisible, setCourseDialogVisible] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string|null>(null);
 
   const [autoSaveTimeout, setAutoSaveTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
@@ -1045,8 +1047,13 @@ export default function RoundInput() {
   }
 
   return (
-    <ScrollView 
-      contentContainerStyle={styles.outerContainer}
+    <ScrollView
+      horizontal={false}
+      showsHorizontalScrollIndicator={false}
+      bounces={false}
+      alwaysBounceHorizontal={false}
+      style={{ flex: 1 }}
+      contentContainerStyle={[styles.outerContainer, { flexGrow: 1, justifyContent: 'flex-start', paddingTop: 60 }]}
       keyboardShouldPersistTaps="handled"
     >
       <Text variant="headlineSmall" style={styles.title}>Record a New Round</Text>
@@ -1064,43 +1071,97 @@ export default function RoundInput() {
       
       <Card style={styles.card}>
         <Card.Content>
-          <TextInput
-            label="Search Course"
-            mode="outlined"
-            value={courseQuery}
-            onChangeText={setCourseQuery}
-            style={styles.input}
-            outlineColor="rgba(255,255,255,0.3)"
-            activeOutlineColor="#00BFFF"
-            textColor="#FFFFFF"
-            placeholderTextColor="rgba(255,255,255,0.5)"
-            theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
-            placeholder="Type at least 3 characters"
-            right={isSearching ? <TextInput.Icon icon="magnify" color="#00BFFF" /> : undefined}
-          />
+          <Text style={styles.label}>Course</Text>
+          <TouchableOpacity 
+            style={styles.customPicker}
+            onPress={() => setCourseDialogVisible(true)}
+          >
+            <Text style={[
+              styles.customPickerText, 
+              !selectedCourse && { color: 'rgba(255,255,255,0.5)' }
+            ]}>
+              {selectedCourse?.course_name || "Select a course..."}
+            </Text>
+            <MaterialCommunityIcons name="chevron-down" size={20} color="#fff" />
+          </TouchableOpacity>
           
-          {filteredCourses.length > 0 ? (
-            filteredCourses.map((c: Course) => (
-              <Button
-                key={c.id}
-                mode={selectedCourse?.id === c.id ? "contained" : "outlined"}
-                style={styles.courseButton}
-                onPress={() => setSelectedCourse(c)}
-              >
-                {c.course_name} <Text style={{color: "#aaa"}}>
-                  {typeof c.location === 'string' 
-                    ? `(${c.location})` 
-                    : `(${[c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ')})`}
-                </Text>
-              </Button>
-            ))
-          ) : (
-            courseQuery.length >= 3 && !isSearching && (
-              <Text style={{ color: "#fff", opacity: 0.7, marginVertical: 8 }}>No courses found.</Text>
-            )
-          )}
-          
-          <View style={{marginVertical: 10}} />
+          <Portal>
+            <Dialog 
+              visible={courseDialogVisible} 
+              onDismiss={() => setCourseDialogVisible(false)}
+              style={styles.teeDialog}
+            >
+              <Dialog.Title style={styles.teeDialogTitle}>Select Course</Dialog.Title>
+              <Dialog.Content style={styles.teeDialogContent}>
+                <TextInput
+                  label="Search Course"
+                  mode="outlined"
+                  value={courseQuery}
+                  onChangeText={setCourseQuery}
+                  style={styles.dialogInput}
+                  outlineColor="rgba(255,255,255,0.3)"
+                  activeOutlineColor="#00BFFF"
+                  textColor="#FFFFFF"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                  theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
+                  placeholder="Search By Club Name"
+                  right={isSearching ? <TextInput.Icon icon="magnify" color="#00BFFF" /> : undefined}
+                />
+                
+                <ScrollView 
+                  style={[
+                    styles.courseScroll,
+                    filteredCourses.length > 0 && {
+                      maxHeight: Math.min(
+                        350,
+                        Math.max(
+                          80,
+                          filteredCourses.length * 58
+                        )
+                      )
+                    }
+                  ]}
+                  showsVerticalScrollIndicator={true}
+                  contentContainerStyle={styles.teeScrollContent}
+                >
+                  {filteredCourses.length > 0 ? (
+                    filteredCourses.map((c: Course) => (
+                      <TouchableOpacity
+                        key={c.id}
+                        style={[
+                          styles.courseOption,
+                          selectedCourse?.id === c.id && styles.courseOptionSelected
+                        ]}
+                        onPress={() => {
+                          setSelectedCourse(c);
+                          setCourseDialogVisible(false);
+                        }}
+                      >
+                        <Text style={[
+                          styles.courseOptionText,
+                          selectedCourse?.id === c.id && styles.courseOptionTextSelected
+                        ]}>
+                          {c.course_name}
+                        </Text>
+                        <Text style={styles.courseLocationText}>
+                          {typeof c.location === 'string' 
+                            ? c.location 
+                            : [c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    courseQuery.length >= 3 && !isSearching && (
+                      <Text style={styles.noCoursesText}>No courses found.</Text>
+                    )
+                  )}
+                </ScrollView>
+              </Dialog.Content>
+              <Dialog.Actions>
+                <Button onPress={() => setCourseDialogVisible(false)}>Cancel</Button>
+              </Dialog.Actions>
+            </Dialog>
+          </Portal>
           
           <Text style={styles.label}>Gender</Text>
           <RadioButton.Group onValueChange={v => setSelectedGender(v as any)} value={selectedGender}>
@@ -1144,25 +1205,84 @@ export default function RoundInput() {
           </RadioButton.Group>
           
           <Text style={styles.label}>Tee</Text>
-          <View style={styles.teeRow}>
-            {((selectedGender === "male" || selectedGender === "female") 
-              ? selectedCourse?.tees?.[selectedGender] || [] 
-              : []
-            ).map((tee: TeeInfo, index: number) => {
-              return (
-                <Button
-                  key={tee.id}
-                  mode={selectedTee === tee.tee_name ? "contained" : "outlined"}
-                  style={styles.teeButton}
-                  onPress={() => setSelectedTee(tee.tee_name)}
-                >
-                  {tee.tee_name}
-                  {tee.course_rating && (
-                    <Text style={{fontSize: 12, color: "#aaa"}}> (CR: {tee.course_rating})</Text>
+          <View style={{ width: '100%', marginBottom: 12 }}>
+            <TouchableOpacity 
+              style={styles.customPicker}
+              onPress={() => setTeeDialogVisible(true)}
+            >
+              <Text style={[
+                styles.customPickerText, 
+                !selectedTee && { color: 'rgba(255,255,255,0.5)' }
+              ]}>
+                {selectedTee || "Select a tee..."}
+              </Text>
+              <MaterialCommunityIcons name="chevron-down" size={20} color="#fff" />
+            </TouchableOpacity>
+            
+            <Portal>
+              <Dialog 
+                visible={teeDialogVisible} 
+                onDismiss={() => setTeeDialogVisible(false)}
+                style={styles.teeDialog}
+              >
+                <Dialog.Title style={styles.teeDialogTitle}>Select Tee</Dialog.Title>
+                <Dialog.Content style={styles.teeDialogContent}>
+                  {((selectedGender === "male" || selectedGender === "female") && 
+                    selectedCourse?.tees?.[selectedGender]) ? (
+                    <ScrollView 
+                      style={[
+                        styles.teeScroll,
+                        {
+                          maxHeight: Math.min(
+                            350,  
+                            Math.max(
+                              80,
+                              
+                              selectedCourse.tees[selectedGender].length * 58 
+                            )
+                          )
+                        }
+                      ]}
+                      showsVerticalScrollIndicator={true}
+                      contentContainerStyle={styles.teeScrollContent}
+                    >
+                      {selectedCourse.tees[selectedGender].map((tee: TeeInfo) => (
+                        <TouchableOpacity
+                          key={tee.id}
+                          style={[
+                            styles.teeOption,
+                            selectedTee === tee.tee_name && styles.teeOptionSelected
+                          ]}
+                          onPress={() => {
+                            setSelectedTee(tee.tee_name);
+                            setTeeDialogVisible(false);
+                          }}
+                        >
+                          <Text style={[
+                            styles.teeOptionText,
+                            selectedTee === tee.tee_name && styles.teeOptionTextSelected
+                          ]}>
+                            {tee.tee_name}
+                            {tee.course_rating ? ` (CR ${tee.course_rating})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  ) : (
+                    <Text style={styles.noTeesText}>
+                      {!selectedGender 
+                        ? "Please select a gender first" 
+                        : !selectedCourse 
+                          ? "Please select a course first" 
+                          : "No tees available for this selection"}
+                    </Text>
                   )}
-                </Button>
-              );
-            })}
+                </Dialog.Content>
+                <Dialog.Actions>
+                  <Button onPress={() => setTeeDialogVisible(false)}>Cancel</Button>
+                </Dialog.Actions>
+              </Dialog>
+            </Portal>
           </View>
           
           <Text style={styles.label}>Number of Holes</Text>
@@ -1630,5 +1750,118 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "600",
+  },
+  picker: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 8,
+    height: 56,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    color: '#fff',
+    justifyContent: 'center',
+  },
+  customPicker: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 8,
+    height: 56,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+  },
+  customPickerText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  teeDialog: {
+    backgroundColor: 'rgba(0,0,38,0.95)',
+    borderRadius: 12,
+    maxWidth: 340,
+    width: '90%',
+    alignSelf: 'center',
+  },
+  teeDialogTitle: {
+    color: '#fff',
+    textAlign: 'center',
+  },
+  teeDialogContent: {
+    paddingVertical: 8,
+  },
+  teeScroll: {
+    // Height will be set dynamically in the component
+  },
+  teeScrollContent: {
+    paddingVertical: 4,
+  },
+  teeOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  teeOptionSelected: {
+    backgroundColor: 'rgba(0,191,255,0.2)',
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  teeOptionText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  teeOptionTextSelected: {
+    color: '#00BFFF',
+    fontWeight: 'bold',
+  },
+  noTeesText: {
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    padding: 16,
+  },
+  courseScroll: {
+    marginTop: 12,
+  },
+  courseOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  courseOptionSelected: {
+    backgroundColor: 'rgba(0,191,255,0.2)',
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  courseOptionText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  courseOptionTextSelected: {
+    color: '#00BFFF',
+    fontWeight: 'bold',
+  },
+  courseLocationText: {
+    color: '#aaa',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  noCoursesText: {
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    padding: 16,
+  },
+  dialogInput: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 8,
   },
 });

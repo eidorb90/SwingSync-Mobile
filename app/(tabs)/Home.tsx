@@ -1,11 +1,12 @@
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from 'expo-status-bar';
 import { jwtDecode } from "jwt-decode";
 import { useCallback, useEffect, useState } from "react";
-import { Image, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { ActivityIndicator, Text } from "react-native-paper";
+import { Animated, Image, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Button, Divider, Modal, Portal, Text } from "react-native-paper";
 import GolfScoreChart from "../components/GolfScoreChart";
 import HandicapChart from "../components/HandicapChart";
 
@@ -21,6 +22,8 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [forceRefresh, setForceRefresh] = useState(0);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  const [fadeAnim] = useState(new Animated.Value(0));
 
   const fetchUserData = useCallback(async () => {
     if (userID === null) {
@@ -128,8 +131,111 @@ export default function HomeScreen() {
     }
   }, [userID, fetchUserData]);
 
+  useEffect(() => {
+    // Check if user has seen the latest "What's New"
+    async function checkWhatsNew() {
+      const currentVersion = Constants.expoConfig?.extra?.ver;
+      const seenVersion = await AsyncStorage.getItem("lastSeenWhatsNewVersion") || "1.0.0";
+      if (currentVersion && seenVersion !== currentVersion) {
+        setShowWhatsNew(true);
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+    checkWhatsNew();
+  }, []);
+
+  const handleCloseWhatsNew = async () => {
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowWhatsNew(false);
+    });
+    
+    const currentVersion = Constants.expoConfig?.extra?.ver;
+    if (currentVersion) {
+      await AsyncStorage.setItem("lastSeenWhatsNewVersion", currentVersion);
+    }
+  };
+
   return (
     <>
+      {/* What's New Modal */}
+      <Portal>
+        <Modal 
+          visible={showWhatsNew} 
+          onDismiss={handleCloseWhatsNew} 
+          contentContainerStyle={styles.whatsNewModalContainer}
+        >
+          <Animated.View style={{ opacity: fadeAnim, width: '100%' }}>
+            <LinearGradient
+              colors={['#000033', '#000080', '#000033']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.whatsNewGradient}
+            >
+              <View style={styles.whatsNewHeader}>
+                <View style={styles.whatsNewIconContainer}>
+                  <Ionicons name="people" size={24} color="#FFD700" />
+                </View>
+                <Text style={styles.whatsNewTitle}>What's New</Text>
+              </View>
+              
+              <View style={styles.whatsNewContent}>
+                <Text style={styles.whatsNewHeadline}>
+                  Introducing the Community Hub
+                </Text>
+                
+                <Text style={styles.whatsNewDescription}>
+                  We're excited to bring you a brand new way to connect with fellow golfers and share your journey.
+                </Text>
+                
+                <View style={styles.featureList}>
+                  <View style={styles.featureItem}>
+                    <MaterialCommunityIcons name="account-group" size={20} color="#4CAF50" style={styles.featureIcon} />
+                    <Text style={styles.featureText}>Connect with other golfers</Text>
+                  </View>
+                  
+                  <View style={styles.featureItem}>
+                    <MaterialCommunityIcons name="share-variant" size={20} color="#2196F3" style={styles.featureIcon} />
+                    <Text style={styles.featureText}>Share rounds, tips, and stories</Text>
+                  </View>
+                  
+                  <View style={styles.featureItem}>
+                    <MaterialCommunityIcons name="thumb-up" size={20} color="#FF9800" style={styles.featureIcon} />
+                    <Text style={styles.featureText}>Like and comment on posts</Text>
+                  </View>
+                  
+                  <View style={styles.featureItem}>
+                    <MaterialCommunityIcons name="golf" size={20} color="#9C27B0" style={styles.featureIcon} />
+                    <Text style={styles.featureText}>See what others are up to in SwingSync</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.whatsNewFooter}>
+                  <Text style={styles.whatsNewFooterText}>
+                    Head to the <Text style={styles.highlightText}>Community</Text> tab to get started!
+                  </Text>
+                </View>
+              </View>
+              
+              <Button 
+                mode="contained" 
+                onPress={handleCloseWhatsNew}
+                style={styles.whatsNewButton}
+                labelStyle={styles.whatsNewButtonLabel}
+              >
+                Let's Go!
+              </Button>
+            </LinearGradient>
+          </Animated.View>
+        </Modal>
+      </Portal>
       <StatusBar style="light" backgroundColor="#000026" />
       <View style={{flex: 1, backgroundColor: '#000026'}}>
         <LinearGradient 
@@ -140,11 +246,7 @@ export default function HomeScreen() {
         >
           <ScrollView 
             style={{flex: 1}}
-            contentContainerStyle={{
-              flexGrow: 1,
-              paddingBottom: 80,
-              justifyContent: 'center', 
-            }}
+            contentContainerStyle={styles.scrollContent}
             refreshControl={
               <RefreshControl 
                 refreshing={refreshing} 
@@ -155,32 +257,50 @@ export default function HomeScreen() {
             }
           >
             <View style={styles.contentContainer}>
-              <View style={styles.headerContainer}>
-                <Text style={styles.title}>
-                  Welcome Back {username} 👋
-                </Text>
-                {profilePicture ? (
-                  <Image 
-                    key={`profile-${forceRefresh}`}  
-                    source={{ 
-                      uri: profilePicture,
-                      cache: 'reload' 
-                    }}
-                    style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 10 }}
-                    resizeMode="cover"
-                    onError={() => setProfilePicture(null)}
-                  />
-                ) : (
-                  <Image 
-                    source={require("../../assets/default-profile.png")}
-                    style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 10 }}
-                    resizeMode="cover"
-                  />
-                )}
-                
-                {error && <Text style={styles.error}>{error}</Text>}
-                {success && <Text style={styles.success}>{success}</Text>}
+              <View style={styles.welcomeCard}>
+                <View style={styles.welcomeContent}>
+                  <View style={styles.profileSection}>
+                    <View style={styles.profileImageWrapper}>
+                      {profilePicture ? (
+                        <Image 
+                          key={`profile-${forceRefresh}`}  
+                          source={{ 
+                            uri: profilePicture,
+                            cache: 'reload' 
+                          }}
+                          style={styles.profileImage}
+                          resizeMode="cover"
+                          onError={() => setProfilePicture(null)}
+                        />
+                      ) : (
+                        <Image 
+                          source={require("../../assets/default-profile.png")}
+                          style={styles.profileImage}
+                          resizeMode="cover"
+                        />
+                      )}
+                    </View>
+                    <View style={styles.welcomeTextContainer}>
+                      <Text style={styles.welcomeText}>Welcome back,</Text>
+                      <Text style={styles.usernameText}>{username} 👋</Text>
+                    </View>
+                  </View>
+                </View>
               </View>
+              
+              {error && (
+                <View style={styles.messageContainer}>
+                  <MaterialCommunityIcons name="alert-circle" size={20} color="#ff6b6b" />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+              
+              {success && (
+                <View style={styles.messageContainer}>
+                  <MaterialCommunityIcons name="check-circle" size={20} color="#51cf66" />
+                  <Text style={styles.successText}>{success}</Text>
+                </View>
+              )}
               
               {loading ? (
                 <View style={styles.loadingContainer}>
@@ -190,12 +310,17 @@ export default function HomeScreen() {
               ) : userData ? (
                 <View style={styles.chartContainer}>
                   <HandicapChart/>
+                  <Divider style={styles.chartDivider} />
                   <GolfScoreChart userData={userData} />
                 </View>
               ) : (
                 <View style={styles.emptyStateContainer}>
+                  <MaterialCommunityIcons name="golf" size={40} color="rgba(255,255,255,0.3)" />
                   <Text style={styles.emptyStateText}>
-                    No golf data available. Play a round and check back!
+                    No golf data available yet
+                  </Text>
+                  <Text style={styles.emptyStateSubtext}>
+                    Play a round and check back to see your statistics!
                   </Text>
                 </View>
               )}
@@ -208,70 +333,281 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 80,
+  },
   contentContainer: {
     flex: 1,
-    justifyContent: 'center', 
-    paddingVertical: 10,
+    paddingTop: 100, // Increased from 20 to 40 to bring content down
+    paddingBottom: 20,
+    paddingHorizontal: 16,
   },
-  headerContainer: {
-    padding: 10,
+  welcomeCard: {
+    backgroundColor: 'rgba(0,0,60,0.7)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  welcomeContent: {
+    flexDirection: 'column',
     alignItems: 'center',
   },
-  title: {
-    fontSize: 22,
+  profileSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  profileImageWrapper: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
+    borderRadius: 40,
+    backgroundColor: '#000026',
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 2,
+    borderColor: '#00BFFF',
+  },
+  welcomeTextContainer: {
+    marginLeft: 18,
+    flex: 1,
+  },
+  welcomeText: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 4,
+  },
+  usernameText: {
+    fontSize: 24,
     fontWeight: "bold",
     color: "#fff",
-    marginBottom: 5,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
   },
-  error: {
-    color: "#ff6b6b",
-    backgroundColor: 'rgba(255, 107, 107, 0.15)',
-    padding: 10,
-    borderRadius: 8,
-    width: '100%',
-    textAlign: 'center',
-    marginTop: 10,
-    overflow: 'hidden',
+  messageContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  success: {
+  errorText: {
+    color: "#ff6b6b",
+    marginLeft: 8,
+    fontSize: 15,
+    flex: 1,
+  },
+  successText: {
     color: "#51cf66",
-    backgroundColor: 'rgba(81, 207, 102, 0.15)',
-    padding: 10,
-    borderRadius: 8,
-    width: '100%',
-    textAlign: 'center',
-    marginTop: 10,
-    overflow: 'hidden',
+    marginLeft: 8,
+    fontSize: 15,
+    flex: 1,
   },
   chartContainer: {
-    width: '100%',
-    paddingHorizontal: 5,
-    paddingVertical: 0,
+    backgroundColor: 'rgba(0,0,60,0.7)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  chartDivider: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    height: 1,
+    marginVertical: 16,
   },
   loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    padding: 15,
+    paddingVertical: 40,
   },
   loadingText: {
     color: '#fff',
-    marginTop: 10,
-    fontSize: 14,
+    marginTop: 16,
+    fontSize: 15,
+    opacity: 0.8,
   },
   emptyStateContainer: {
-    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,60,0.7)',
+    borderRadius: 16,
+    padding: 30,
+    marginTop: 20,
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.15)',
-    borderRadius: 8,
-    margin: 20,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   emptyStateText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+    marginBottom: 8,
     textAlign: 'center',
-    lineHeight: 24,
-  }
+  },
+  emptyStateSubtext: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  
+  // What's New Modal Styles
+  whatsNewModalContainer: {
+    backgroundColor: 'transparent',
+    margin: 24,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 191, 255, 0.5)',
+  },
+  whatsNewGradient: {
+    borderRadius: 18,
+    padding: 0,
+    width: '100%',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  whatsNewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(0,0,70,0.7)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  whatsNewIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,40,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.5)',
+  },
+  whatsNewTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    textShadowColor: 'rgba(0, 0, 0, 0.4)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+    letterSpacing: 0.5,
+  },
+  whatsNewContent: {
+    padding: 24,
+    width: '100%',
+  },
+  whatsNewHeadline: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#00BFFF',
+    marginBottom: 14,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  whatsNewDescription: {
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  featureList: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    padding: 12,
+    borderRadius: 10,
+  },
+  featureIcon: {
+    marginRight: 12,
+  },
+  featureText: {
+    color: '#fff',
+    fontSize: 15,
+    flex: 1,
+  },
+  whatsNewFooter: {
+    backgroundColor: 'rgba(0, 191, 255, 0.15)',
+    padding: 14,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  whatsNewFooterText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  highlightText: {
+    color: '#FFD700',
+    fontWeight: 'bold',
+  },
+  whatsNewButton: {
+    backgroundColor: "#00BFFF",
+    borderRadius: 12,
+    paddingHorizontal: 32,
+    paddingVertical: 8,
+    marginTop: 10,
+    marginBottom: 20,
+    elevation: 3,
+    width: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  whatsNewButtonLabel: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+    letterSpacing: 0.5,
+    textTransform: 'none',
+  },
 });

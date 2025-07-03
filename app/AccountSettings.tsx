@@ -1,13 +1,12 @@
-import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Text, Button, TextInput, Snackbar } from 'react-native-paper';
-import { Stack } from 'expo-router';
-import { LinearGradient } from "expo-linear-gradient";
-import { StatusBar } from 'expo-status-bar';
-import { useState, useEffect, useCallback } from 'react';
-import { jwtDecode } from 'jwt-decode';
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
+import { LinearGradient } from "expo-linear-gradient";
+import { Stack, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { jwtDecode } from 'jwt-decode';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Button, Snackbar, Text, TextInput } from 'react-native-paper';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.BACKEND_URL;
 
@@ -207,15 +206,17 @@ export default function AccountSettingsScreen() {
                     <ScrollView 
                         style={{flex: 1}}
                         contentContainerStyle={{paddingBottom: 40}}
+                        keyboardShouldPersistTaps="handled"
                     >
                         {loading ? (
                             <View style={styles.loadingContainer}>
                                 <Text style={styles.loadingText}>Loading...</Text>
                             </View>
                         ) : (
-                            <View style={styles.contentContainer}>
-                                <View style={styles.section}>
-                                    <Text style={styles.title}>Username</Text>
+                            <View style={styles.outerContainer}>
+                                <Text style={styles.pageTitle}> </Text>
+                                <View style={styles.card}>
+                                    <Text style={styles.sectionTitle}>Username</Text>
                                     <Text style={styles.current}>@{username}</Text>
                                     <TextInput 
                                         label="Change Username" 
@@ -231,24 +232,31 @@ export default function AccountSettingsScreen() {
                                         placeholderTextColor="rgba(255, 255, 255, 0.5)"
                                         theme={{ colors: { onSurfaceVariant: 'rgba(255, 255, 255, 0.7)' } }}
                                     />
+                                    <Text style={styles.helperText}>
+                                        Your username is unique and visible to others.
+                                    </Text>
                                 </View>
                                 
-                                <View style={styles.section}>
-                                    <Text style={styles.title}>Email</Text>
+                                <View style={styles.card}>
+                                    <Text style={styles.sectionTitle}>Email</Text>
                                     <Text style={styles.current}>{email}</Text>
                                     <Text style={styles.helperText}>Email cannot be changed. Contact support if needed.</Text>
                                 </View>
                                 
-                                <View style={styles.section}>
-                                    <Text style={styles.title}>Password</Text>
+                                <View style={styles.card}>
+                                    <Text style={styles.sectionTitle}>Password</Text>
                                     <Button 
                                         mode="outlined"
                                         style={styles.resetButton}
                                         labelStyle={styles.resetButtonText} 
                                         onPress={confirmPasswordReset}
+                                        icon="lock-reset"
                                     >
                                         Reset Password
                                     </Button>
+                                    <Text style={styles.helperText}>
+                                        You will receive a password reset link at your email.
+                                    </Text>
                                 </View>
                                 
                                 {isChanged && (
@@ -258,10 +266,15 @@ export default function AccountSettingsScreen() {
                                         loading={saveLoading}
                                         disabled={saveLoading}
                                         onPress={saveChanges}
+                                        icon="content-save"
+                                        labelStyle={styles.saveButtonLabel}
                                     >
                                         Save Changes
                                     </Button>
                                 )}
+                                {error ? (
+                                    <Text style={styles.errorText}>{error}</Text>
+                                ) : null}
                             </View>
                         )}
                     </ScrollView>
@@ -276,6 +289,7 @@ export default function AccountSettingsScreen() {
                     label: 'Close',
                     onPress: () => setSnackbarVisible(false),
                 }}
+                style={styles.snackbar}
             >
                 {snackbarMessage}
             </Snackbar>
@@ -295,43 +309,49 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 18,
     },
-    contentContainer: {
-        padding: 20,
+    outerContainer: {
+        padding: 18,
+        paddingTop: 8,
     },
     pageTitle: {
         fontSize: 28,
         fontWeight: 'bold',
         color: '#fff',
-        marginBottom: 30,
+        marginBottom: 18,
         textAlign: 'center',
+        letterSpacing: 1,
+        textShadowColor: 'rgba(0,0,0,0.25)',
+        textShadowOffset: { width: 1, height: 2 },
+        textShadowRadius: 4,
     },
-    section: {
-        marginBottom: 30,
-        backgroundColor: 'rgba(0, 0, 38, 0.3)',
-        padding: 16,
-        borderRadius: 10,
+    card: {
+        backgroundColor: 'rgba(0,0,60,0.85)',
+        borderRadius: 16,
+        marginBottom: 22,
+        padding: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.18,
+        shadowRadius: 8,
+        elevation: 6,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
     },
-    title: {
-        fontSize: 18,
+    sectionTitle: {
+        fontSize: 20,
         fontWeight: 'bold',
-        color: '#fff',
-        marginBottom: 10,
-        textAlign: 'left',
+        color: '#00BFFF',
+        marginBottom: 8,
+        letterSpacing: 0.5,
     },
     current: {
         fontSize: 16,
         color: '#fff',
-        marginBottom: 15,
-    },
-    resetButtonText: {
-        fontSize: 16,
-        color: "#FF6B6B"
-    },
-    resetButton: {
-        borderColor: "#FF6B6B",
+        marginBottom: 10,
+        fontWeight: '600',
     },
     input: {
-        marginBottom: 8,
+        marginBottom: 10,
         backgroundColor: 'rgba(255, 255, 255, 0.12)',
         borderRadius: 8,
     },
@@ -339,10 +359,44 @@ const styles = StyleSheet.create({
         color: 'rgba(255, 255, 255, 0.7)',
         fontStyle: 'italic',
         fontSize: 14,
+        marginTop: 2,
+        marginBottom: 2,
+    },
+    resetButtonText: {
+        fontSize: 16,
+        color: "#FF6B6B",
+        fontWeight: 'bold',
+    },
+    resetButton: {
+        borderColor: "#FF6B6B",
+        marginTop: 4,
+        marginBottom: 6,
+        borderRadius: 8,
     },
     saveButton: {
-        marginTop: 20,
+        marginTop: 10,
         backgroundColor: '#00BFFF',
-        padding: 5,
-    }
+        paddingVertical: 10,
+        borderRadius: 10,
+        elevation: 3,
+        alignSelf: 'center',
+        minWidth: 180,
+    },
+    saveButtonLabel: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 17,
+        letterSpacing: 0.5,
+    },
+    errorText: {
+        color: '#ff6b6b',
+        textAlign: 'center',
+        marginTop: 10,
+        fontWeight: '600',
+        fontSize: 15,
+    },
+    snackbar: {
+        backgroundColor: '#232366',
+        borderRadius: 8,
+    },
 });

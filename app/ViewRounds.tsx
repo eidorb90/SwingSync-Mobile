@@ -183,119 +183,142 @@ export default function ViewRounds() {
     };
 
     const renderRoundSummary = (round: Round) => {
-        return (
-         <Card key={round.id} style={styles.card}>
-           <TouchableOpacity 
-               onPress={() => toggleRoundExpansion(round.id)}
-               style={styles.roundButton}
-           >
-               <View style={styles.roundSummary}>
-                   <View style={styles.roundHeader}>
-                       <View style={styles.roundTitleContainer}>
-                           <Text style={styles.courseTitle}>{round.course}</Text>
-                           <Text style={styles.roundInfo}>
-                               {formatDate(round.date_played)} • {round.tee} Tees • Score: {round.total_score}
-                           </Text>
-                       </View>
-                       <IconButton
-                           icon="delete"
-                           iconColor="#F44336"
-                           size={20}
-                           onPress={() => confirmDeleteRound(round.id, round.course)}
-                           style={styles.deleteButton}
-                       />
-                   </View>
-                    <Text style={styles.notesLabel}>Notes</Text>
-                    <Text style={styles.notesText}>
-                        {round.notes && round.notes.trim().length > 0
-                        ? round.notes
-                        : "No notes found"}
-                    </Text>
-               </View>
-           </TouchableOpacity>
-           
-           {expandedRound === round.id && (
-             <Card.Content>
-   {round.hole_stats && round.hole_stats.length > 0 ? (
-    <View style={styles.scorecardGrid}>
-       <View style={styles.headerRow}>
-         <Text style={styles.headerCell}>Hole</Text>
-         <Text style={styles.headerCell}>Par</Text>       {/* ← header */}
-         <Text style={styles.headerCell}>Score</Text>
-         <Text style={styles.headerCell}>+/-</Text>
-       </View>
-       {round.hole_stats.map(holeStat => (
-          <View key={holeStat.hole}>
-            <TouchableOpacity 
-              onPress={() => toggleHoleExpansion(holeStat.hole)} 
-              style={styles.dataRow}
-            >
-              <Text style={styles.dataCell}>{holeStat.hole}</Text>
-              <Text style={styles.dataCell}>{holeStat.par}</Text>  {/* ← this is where the par value is shown */}
-              <View style={[styles.dataCell, styles.scoreContainer]}>
-                <View style={getScoreStyle(holeStat.strokes, holeStat.par)}>
-                  <Text style={styles.scoreText}>{holeStat.strokes}</Text>
-                </View>
-              </View>
-              <Text style={[
-                  styles.dataCell,
-                  holeStat.strokes < holeStat.par ? styles.underPar :
-                  holeStat.strokes > holeStat.par ? styles.overPar : styles.par
-                ]}>
-                {holeStat.strokes === holeStat.par ? 'E' :
-                 holeStat.strokes < holeStat.par ? `-${holeStat.par - holeStat.strokes}` :
-                 `+${holeStat.strokes - holeStat.par}`}
-              </Text>
-            </TouchableOpacity>
-            {expandedHole === holeStat.hole && (
-              <View style={styles.detailContainer}>
-                <View style={styles.statGrid}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Yards</Text>
-                    <Text style={styles.statValue}>{holeStat.yardage}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Putts</Text>
-                    <Text style={styles.statValue}>{holeStat.putts}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Penalties</Text>
-                    <Text style={styles.statValue}>{holeStat.penalties}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Chips</Text>
-                    <Text style={styles.statValue}>{holeStat.chip_shots ?? 0}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Approach</Text>
-                    <Text style={styles.statValue}>{holeStat.approach_shots ?? 0}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Tee</Text>
-                    <Text style={styles.statValue}>{holeStat.tee_shot ?? 1}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>FW Hit</Text>
-                    <Text style={styles.statValue}>{holeStat.fairway_hit ? '✔️' : '❌'}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>GIR</Text>
-                    <Text style={styles.statValue}>{holeStat.green_in_regulation ? '✔️' : '❌'}</Text>
+      return (
+        <Card key={round.id} style={styles.card}>
+          <TouchableOpacity 
+            onPress={() => toggleRoundExpansion(round.id)}
+            style={styles.roundButton}
+            activeOpacity={0.7}
+          >
+            <View style={styles.roundSummary}>
+              <View style={styles.roundHeader}>
+                <View style={styles.roundTitleContainer}>
+                  <Text style={styles.courseTitle}>{round.course}</Text>
+                  <Text style={styles.roundInfo}>
+                    {formatDate(round.date_played)} • {round.tee} Tees
+                  </Text>
+                  <View style={styles.scoreBadge}>
+                    <Text style={styles.scoreBadgeText}>Score: {round.total_score}</Text>
                   </View>
                 </View>
+                <IconButton
+                  icon="delete"
+                  iconColor="#F44336"
+                  size={20}
+                  onPress={() => confirmDeleteRound(round.id, round.course)}
+                  style={styles.deleteButton}
+                />
               </View>
-            )}
-          </View>
-      ))}
-                 </View>
-               ) : (
-                 <Text style={styles.noDataText}>No hole data available</Text>
-               )}
-
-             </Card.Content>
-           )}
-         </Card>
-       );
+              {round.notes && round.notes.trim().length > 0 && (
+                <>
+                  <Text style={styles.notesLabel}>Notes</Text>
+                  <View style={styles.notesCard}>
+                    <Text style={styles.notesText}>{round.notes}</Text>
+                  </View>
+                </>
+              )}
+            </View>
+          </TouchableOpacity>
+          
+          {expandedRound === round.id && (
+            <Card.Content style={styles.expandedContent}>
+              {round.hole_stats && round.hole_stats.length > 0 ? (
+                <View style={styles.scorecardGrid}>
+                  <View style={styles.headerRow}>
+                    <Text style={styles.headerCell}>Hole</Text>
+                    <Text style={styles.headerCell}>Par</Text>
+                    <Text style={styles.headerCell}>Score</Text>
+                    <Text style={styles.headerCell}>+/-</Text>
+                  </View>
+                  {round.hole_stats.map(holeStat => (
+                    <View key={holeStat.hole}>
+                      <TouchableOpacity 
+                        onPress={() => toggleHoleExpansion(holeStat.hole)} 
+                        style={[
+                          styles.dataRow,
+                          expandedHole === holeStat.hole && styles.activeDataRow
+                        ]}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.dataCell}>{holeStat.hole}</Text>
+                        <Text style={styles.dataCell}>{holeStat.par}</Text>
+                        <View style={[styles.dataCell, styles.scoreContainer]}>
+                          <View style={getScoreStyle(holeStat.strokes, holeStat.par)}>
+                            <Text style={styles.scoreText}>{holeStat.strokes}</Text>
+                          </View>
+                        </View>
+                        <Text style={[
+                          styles.dataCell,
+                          holeStat.strokes < holeStat.par ? styles.underPar :
+                          holeStat.strokes > holeStat.par ? styles.overPar : styles.par
+                        ]}>
+                          {holeStat.strokes === holeStat.par ? 'E' :
+                           holeStat.strokes < holeStat.par ? `-${holeStat.par - holeStat.strokes}` :
+                           `+${holeStat.strokes - holeStat.par}`}
+                        </Text>
+                      </TouchableOpacity>
+                      {expandedHole === holeStat.hole && (
+                        <View style={styles.detailContainer}>
+                          <View style={styles.statGrid}>
+                            <View style={styles.statItem}>
+                              <Text style={styles.statLabel}>Yards</Text>
+                              <Text style={styles.statValue}>{holeStat.yardage}</Text>
+                            </View>
+                            <View style={styles.statItem}>
+                              <Text style={styles.statLabel}>Putts</Text>
+                              <Text style={styles.statValue}>{holeStat.putts}</Text>
+                            </View>
+                            <View style={styles.statItem}>
+                              <Text style={styles.statLabel}>Penalties</Text>
+                              <Text style={styles.statValue}>{holeStat.penalties}</Text>
+                            </View>
+                            <View style={styles.statItem}>
+                              <Text style={styles.statLabel}>Chips</Text>
+                              <Text style={styles.statValue}>{holeStat.chip_shots ?? 0}</Text>
+                            </View>
+                            <View style={styles.statItem}>
+                              <Text style={styles.statLabel}>Approach</Text>
+                              <Text style={styles.statValue}>{holeStat.approach_shots ?? 0}</Text>
+                            </View>
+                            <View style={styles.statItem}>
+                              <Text style={styles.statLabel}>Tee</Text>
+                              <Text style={styles.statValue}>{holeStat.tee_shot ?? 1}</Text>
+                            </View>
+                            <View style={styles.statItem}>
+                              <View style={styles.performanceIndicator}>
+                                <Text style={styles.statLabel}>FW Hit</Text>
+                                <Text style={[
+                                  styles.statValue, 
+                                  holeStat.fairway_hit ? styles.statSuccess : styles.statFail
+                                ]}>
+                                  {holeStat.fairway_hit ? '✓' : '✗'}
+                                </Text>
+                              </View>
+                            </View>
+                            <View style={styles.statItem}>
+                              <View style={styles.performanceIndicator}>
+                                <Text style={styles.statLabel}>GIR</Text>
+                                <Text style={[
+                                  styles.statValue, 
+                                  holeStat.green_in_regulation ? styles.statSuccess : styles.statFail
+                                ]}>
+                                  {holeStat.green_in_regulation ? '✓' : '✗'}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.noDataText}>No hole data available</Text>
+              )}
+            </Card.Content>
+          )}
+        </Card>
+      );
     }
 
     if (loading) {
@@ -389,87 +412,106 @@ const styles = StyleSheet.create({
     },
     scrollView: {
         flex: 1,
+        width: '100%',
     },
     scrollContent: {
         padding: 16,
         paddingBottom: 100,
     },
     card: {
-        marginBottom: 16,
-        backgroundColor: 'rgba(0, 0, 60, 0.8)',
-        borderRadius: 12,
-        elevation: 3,
+        marginBottom: 24,
+        backgroundColor: 'rgba(0, 0, 60, 0.85)',
+        borderRadius: 16,
+        elevation: 5,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.4,
+        shadowRadius: 8,
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+        overflow: 'hidden',
     },
     roundButton: {
         padding: 0,
-        borderRadius: 12,
+        borderRadius: 16,
         overflow: 'hidden',
     },
     roundSummary: {
-        padding: 16,
-        backgroundColor: 'rgba(0, 0, 80, 0.3)',
+        padding: 18,
+        backgroundColor: 'rgba(0, 0, 80, 0.25)',
     },
     roundHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
     roundTitleContainer: {
         flex: 1,
         marginRight: 8,
     },
     courseTitle: {
-        fontSize: 18,
+        fontSize: 24,
         fontWeight: 'bold',
         color: '#00BFFF',
-        marginBottom: 4,
+        marginBottom: 6,
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 1, height: 1 },
+        textShadowRadius: 3,
     },
     roundInfo: {
-        fontSize: 14,
-        color: 'rgba(255, 255, 255, 0.8)',
-        marginBottom: 4,
+        fontSize: 16,
+        color: 'rgba(255, 255, 255, 0.85)',
+        marginBottom: 8,
+        letterSpacing: 0.3,
     },
     deleteButton: {
         margin: 0,
-        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+        backgroundColor: 'rgba(244, 67, 54, 0.12)',
         borderRadius: 8,
+    },
+    expandedContent: {
+        backgroundColor: 'rgba(0, 0, 70, 0.7)',
+        paddingTop: 12,
+        paddingBottom: 14,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255, 255, 255, 0.1)',
     },
     scorecardGrid: {
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.2)',
-        borderRadius: 8,
+        borderRadius: 12,
         backgroundColor: 'rgba(0, 0, 40, 0.7)',
         overflow: 'hidden',
     },
     headerRow: {
         flexDirection: 'row',
-        backgroundColor: 'rgba(0, 0, 100, 0.6)',
-        borderBottomWidth: 1,
+        backgroundColor: 'rgba(0, 0, 150, 0.6)',
+        borderBottomWidth: 2,
         borderBottomColor: 'rgba(255, 255, 255, 0.2)',
     },
     dataRow: {
         flexDirection: 'row',
         borderBottomWidth: 1,
         borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+        paddingVertical: 2,
+    },
+    activeDataRow: {
+        backgroundColor: 'rgba(0, 191, 255, 0.15)',
     },
     headerCell: {
         flex: 1,
-        padding: 12,
-        fontSize: 12,
-        fontWeight: 'bold',
+        padding: 14,
+        fontSize: 14,
+        fontWeight: '700',
         textAlign: 'center',
         color: '#fff',
+        textTransform: 'uppercase',
+        letterSpacing: 1,
     },
     dataCell: {
         flex: 1,
-        padding: 12,
-        fontSize: 14,
+        padding: 14,
+        fontSize: 16,
         textAlign: 'center',
         color: '#fff',
     },
@@ -479,63 +521,38 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
     },
     scoreCircle: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         borderWidth: 2,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'transparent',
-    },
-    scoreDoubleCircle: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        borderWidth: 2,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        shadowColor: '#00BFFF',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 1,
-        shadowRadius: 3,
-        elevation: 5,
     },
     scoreSquare: {
-        width: 30,
-        height: 30,
+        width: 36,
+        height: 36,
         borderWidth: 2,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'transparent',
     },
     scoreDoubleSquare: {
-        width: 30,
-        height: 30,
+        width: 36,
+        height: 36,
         borderWidth: 3,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'transparent',
         shadowColor: '#FF9800',
-        shadowOffset: { width: 1, height: 1 },
-        shadowOpacity: 0.5,
-        shadowRadius: 2,
-    },
-    scoreTripleSquare: {
-        width: 30,
-        height: 30,
-        borderWidth: 4,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        shadowColor: '#F44336',
-        shadowOffset: { width: 2, height: 2 },
-        shadowOpacity: 0.7,
-        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.6,
+        shadowRadius: 4,
+        elevation: 5,
     },
     scoreNormal: {
-        width: 30,
-        height: 30,
+        width: 36,
+        height: 36,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -552,7 +569,7 @@ const styles = StyleSheet.create({
         borderColor: '#F44336',
     },
     scoreText: {
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 'bold',
         color: '#fff',
     },
@@ -573,19 +590,24 @@ const styles = StyleSheet.create({
         fontSize: 16,
         textAlign: 'center',
         marginTop: 20,
-        backgroundColor: 'rgba(244, 67, 54, 0.1)',
+        marginBottom: 20,
+        backgroundColor: 'rgba(244, 67, 54, 0.15)',
         padding: 16,
         borderRadius: 8,
         marginHorizontal: 16,
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 1, height: 1 },
         textShadowRadius: 2,
+        borderWidth: 1,
+        borderColor: 'rgba(244, 67, 54, 0.3)',
     },
     noDataText: {
         textAlign: 'center',
         lineHeight: 24,
-        color: 'rgba(255, 255, 255, 0.6)',
+        color: 'rgba(255, 255, 255, 0.7)',
         fontStyle: 'italic',
+        padding: 20,
+        fontSize: 16,
     },
     emptyStateContainer: {
         flex: 1,
@@ -593,59 +615,107 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         padding: 32,
         marginVertical: 64,
+        backgroundColor: 'rgba(0, 0, 60, 0.4)',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
     },
     emptyStateText: {
-        fontSize: 20,
+        fontSize: 24,
         fontWeight: 'bold',
         color: '#fff',
         textAlign: 'center',
-        marginBottom: 8,
+        marginBottom: 12,
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 1, height: 1 },
         textShadowRadius: 3,
     },
     emptyStateSubtext: {
-        fontSize: 16,
-        color: 'rgba(255, 255, 255, 0.7)',
+        fontSize: 18,
+        color: 'rgba(255, 255, 255, 0.8)',
         textAlign: 'center',
         lineHeight: 24,
     },
     detailContainer: {
         paddingHorizontal: 16,
-        paddingBottom: 12,
-        backgroundColor: 'rgba(0,0,40,0.6)',
+        paddingVertical: 14,
+        backgroundColor: 'rgba(0,0,70,0.7)',
         borderBottomLeftRadius: 12,
         borderBottomRightRadius: 12,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255, 255, 255, 0.08)',
     },
     statGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'space-between',
-        marginTop: 8,
     },
     statItem: {
         width: '48%',
-        marginBottom: 12,
+        marginBottom: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.07)',
+        borderRadius: 8,
+        padding: 10,
     },
     statLabel: {
         color: 'rgba(255, 255, 255, 0.7)',
         fontSize: 12,
-        marginBottom: 4,
+        marginBottom: 6,
+        fontWeight: '500',
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
     statValue: {
         color: '#fff',
-        fontSize: 14,
+        fontSize: 18,
+        fontWeight: '600',
+    },
+    statSuccess: {
+        color: '#4CAF50',
+        fontWeight: 'bold',
+    },
+    statFail: {
+        color: '#F44336',
         fontWeight: 'bold',
     },
     notesLabel: {
-      color: '#fff',
-      fontWeight: 'bold',
-      marginTop: 12,
-      fontSize: 14,
+        color: '#fff',
+        fontWeight: 'bold',
+        marginTop: 12,
+        fontSize: 16,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 8,
+    },
+    notesCard: {
+        backgroundColor: 'rgba(255,255,255,0.07)',
+        borderRadius: 8,
+        padding: 12,
+        borderLeftWidth: 3,
+        borderLeftColor: '#00BFFF',
     },
     notesText: {
-      color: 'rgba(255,255,255,0.8)',
-      fontSize: 14,
-      marginBottom: 8,
+        color: 'rgba(255,255,255,0.9)',
+        fontSize: 15,
+        lineHeight: 22,
+    },
+    scoreBadge: {
+        backgroundColor: 'rgba(0, 191, 255, 0.2)',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        alignSelf: 'flex-start',
+        borderWidth: 1,
+        borderColor: 'rgba(0, 191, 255, 0.3)',
+        marginTop: 4,
+    },
+    scoreBadgeText: {
+        color: '#00BFFF',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    performanceIndicator: {
+        flexDirection: 'column',
+        alignItems: 'center',
     },
 });

@@ -1,9 +1,8 @@
 import AntDesign from '@expo/vector-icons/AntDesign';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { HeaderShownContext } from '@react-navigation/elements';
-import { Tabs } from "expo-router";
-import { Platform } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { BlurView } from 'expo-blur';
+import { Tabs } from "expo-router";
 
 export default function TabsLayout() {
   return (
@@ -13,14 +12,14 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: "gray", 
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: 'transparent', 
+          backgroundColor: 'rgba(255, 255, 255, 0)', // semi-transparent for glassy look
           position: 'absolute',
           elevation: 0,
           borderTopWidth: 0,
-          ...(Platform.OS === 'ios' ? {
-            blurEffect: 'light',
-          } : {})
-        }
+        },
+        tabBarBackground: () => (
+          <BlurView tint="light" intensity={5} style={{ flex: 1 }} />
+        ),
       }}
     >
     <Tabs.Screen name="Home" options={{title: "Home", tabBarIcon: ({ color }) => (
@@ -83,9 +82,9 @@ export default function TabsLayout() {
     />
 
     <Tabs.Screen 
-      name="Settings" 
+      name="Profile" 
       options={{
-        title: "Settings",
+        title: "Profile",
         tabBarIcon: ({ color, focused }) => (
           focused ? (
             <Ionicons name="settings" size={24} color={ color } />
