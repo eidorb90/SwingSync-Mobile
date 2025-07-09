@@ -1,11 +1,14 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import * as Location from 'expo-location';
 import { useRouter } from "expo-router";
+import { Magnetometer } from 'expo-sensors';
 import { jwtDecode } from "jwt-decode";
 import { useEffect, useState } from "react";
-import { Keyboard, ScrollView, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
-import { Button, Card, Dialog, Divider, Portal, RadioButton, Switch, Text, TextInput } from "react-native-paper";
+import { Keyboard, ScrollView, StyleSheet, TouchableOpacity, TouchableWithoutFeedback, View, Dimensions } from "react-native";
+import { Button, Card, Dialog, Divider, Portal, Switch, Text, TextInput, Modal } from "react-native-paper";
+import MapView, { Marker } from 'react-native-maps';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.BACKEND_URL;
 
@@ -15,6 +18,8 @@ interface HoleDetail {
   par: number;
   yardage: number;
   handicap: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 interface TeeInfo {
@@ -75,6 +80,57 @@ interface Draft {
   user: string;
 }
 
+// Constants for GPS-enabled courses
+const SUPPORTED_COURSES_WITH_GPS = ["Benkelman Country Club"];
+
+const BENKELMAN_HOLE_COORDINATES = [
+  { lat: 40.07626, lon: -101.49051 }, // Hole 1
+  { lat: 40.07444, lon: -101.49333 }, // Hole 2
+  { lat: 40.07288, lon: -101.49344 }, // Hole 3
+  { lat: 40.07582, lon: -101.49008 }, // Hole 4
+  { lat: 40.07297, lon: -101.49244 }, // Hole 5
+  { lat: 40.07571, lon: -101.48802 }, // Hole 6
+  { lat: 40.07738, lon: -101.48543 }, // Hole 7
+  { lat: 40.07544, lon: -101.48954 }, // Hole 8
+  { lat: 40.07799, lon: -101.48626 }, // Hole 9
+];
+
+// For holes 10-18, we'll use the same coordinates as 1-9
+const ALL_HOLE_COORDINATES = [
+  ...BENKELMAN_HOLE_COORDINATES,
+  ...BENKELMAN_HOLE_COORDINATES
+];
+
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (lat1 * Math.PI) / 180; // Convert degrees to radians
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in meters
+
+  return d;
+};
+
+// Auto-calculate Green in Regulation
+const calculateGIR = (strokes: number, par: number, putts: number): boolean => {
+  if (!strokes || !par || putts === null || putts === undefined) return false;
+  
+  // GIR means reaching the green in regulation strokes
+  // Par 3: GIR if on green in 1 stroke (total strokes - putts = 1)
+  // Par 4: GIR if on green in 2 strokes (total strokes - putts = 2)  
+  // Par 5: GIR if on green in 3 strokes (total strokes - putts = 3)
+  const strokesBeforePutting = strokes - putts;
+  const regulationStrokes = par - 2; // Par 3 = 1, Par 4 = 2, Par 5 = 3
+  
+  return strokesBeforePutting <= regulationStrokes;
+};
+
 export default function RoundInput() {
   const [token, setToken] = useState<string | null>(null);
   const [userID, setUserID] = useState<string | null>(null);
@@ -107,8 +163,259 @@ export default function RoundInput() {
 
   const router = useRouter();
 
+  const [currentLocation, setCurrentLocation] = useState<Location.LocationObject | null>(null);
+  const [distanceToHole, setDistanceToHole] = useState<number | null>(null);
+  const [locationSubscription, setLocationSubscription] = useState<Location.LocationSubscription | null>(null);
+  const [isLocationEnabled, setIsLocationEnabled] = useState(false);
+
+  const [runningStats, setRunningStats] = useState({
+    totalScore: 0,
+    totalPutts: 0,
+    totalPenalties: 0,
+    fairwaysHit: 0,
+    girs: 0,
+    holesCompleted: 0,
+    strokesGained: 0
+  });
+
+  const [weatherData, setWeatherData] = useState<any>(null);
+  const [loadingWeather, setLoadingWeather] = useState(false);
+  const [showWeatherImpact, setShowWeatherImpact] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [weatherDebugInfo, setWeatherDebugInfo] = useState<string | null>(null);
+  const [showWeatherDebug, setShowWeatherDebug] = useState(false);
+
+  const [phoneHeading, setPhoneHeading] = useState<number | null>(null);
+  const [magnetometerSubscription, setMagnetometerSubscription] = useState<any>(null);
+
+  // Map modal state
+  const [mapModalVisible, setMapModalVisible] = useState(false);
+  const [selectedHole, setSelectedHole] = useState<HoleDetail | null>(null);
+  const [tempMarkerCoordinate, setTempMarkerCoordinate] = useState<{latitude: number, longitude: number} | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
+
   useEffect(() => {
     fetchTokenAndSetUserID();
+  }, []);
+
+  // Add location permission request and tracking
+  // Function to start location tracking
+  const startLocationTracking = async () => {
+    try {
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        showAlert("Location permission not granted. Distance tracking disabled.", "info");
+        return null;
+      }
+      
+      setIsLocationEnabled(true);
+      
+      // Start watching the user's position with more frequent updates
+      const subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 2000, // Update more frequently (every 2 seconds)
+          distanceInterval: 3, // Update with smaller movements (every 3 meters)
+        },
+        (location) => {
+          setCurrentLocation(location);
+          updateDistanceToCurrentHole(location.coords);
+        }
+      );
+      
+      return subscription;
+    } catch (error) {
+      console.error("Error starting location tracking:", error);
+      showAlert("Error starting location tracking", "error");
+      return null;
+    }
+  };
+
+  // Function to update distance to current hole
+  const updateDistanceToCurrentHole = (coords: {latitude: number; longitude: number}) => {
+    if (!selectedCourse) {
+      setDistanceToHole(null);
+      return;
+    }
+
+    // Get the current hole data
+    const currentHoleData = scores[currentHole];
+    if (!currentHoleData) {
+      setDistanceToHole(null);
+      return;
+    }
+
+    // Check if hole has custom coordinates (user-set location)
+    if (currentHoleData.hole_id && selectedGender) {
+      const selectedTeeObj = selectedCourse?.tees?.[selectedGender as "male" | "female"]?.find(
+        (t: TeeInfo) => t.tee_name === selectedTee
+      );
+      const holeDetail = selectedTeeObj?.holes?.find((h: HoleDetail) => h.id === currentHoleData.hole_id);
+      
+      if (holeDetail && holeDetail.latitude && holeDetail.longitude) {
+        // Use database coordinates
+        const distance = calculateDistance(
+          coords.latitude,
+          coords.longitude,
+          holeDetail.latitude,
+          holeDetail.longitude
+        );
+        const distanceYards = Math.round(distance * 1.09361);
+        setDistanceToHole(distanceYards);
+        return;
+      }
+    }
+
+    // Fallback to legacy GPS coordinates for supported courses
+    if (SUPPORTED_COURSES_WITH_GPS.includes(selectedCourse.course_name)) {
+      const holeCoords = ALL_HOLE_COORDINATES[currentHole];
+      if (holeCoords) {
+        const distance = calculateDistance(
+          coords.latitude,
+          coords.longitude,
+          holeCoords.lat,
+          holeCoords.lon
+        );
+        const distanceYards = Math.round(distance * 1.09361);
+        setDistanceToHole(distanceYards);
+        return;
+      }
+    }
+
+    setDistanceToHole(null);
+  };
+
+  // useEffect for managing location tracking
+  useEffect(() => {
+    // Check if we should start tracking
+    const shouldTrackLocation = 
+      started && 
+      selectedCourse && 
+      SUPPORTED_COURSES_WITH_GPS.includes(selectedCourse.course_name);
+    
+    const setupLocationTracking = async () => {
+      if (shouldTrackLocation && !locationSubscription) {
+        // Start tracking
+        const subscription = await startLocationTracking();
+        if (subscription) {
+          setLocationSubscription(subscription);
+        }
+      } else if (!shouldTrackLocation && locationSubscription) {
+        // Stop tracking
+        locationSubscription.remove();
+        setLocationSubscription(null);
+        setDistanceToHole(null);
+        setIsLocationEnabled(false);
+      }
+    };
+    
+    setupLocationTracking();
+    
+    // Cleanup on component unmount or when tracking should stop
+    return () => {
+      if (locationSubscription) {
+        locationSubscription.remove();
+        setLocationSubscription(null);
+      }
+    };
+  }, [started, selectedCourse]);
+
+  // Update distance when hole changes
+  useEffect(() => {
+    if (currentLocation && currentLocation.coords) {
+      updateDistanceToCurrentHole(currentLocation.coords);
+    }
+  }, [currentHole, currentLocation]);
+
+  // Clean up location subscription when component unmounts
+  useEffect(() => {
+    return () => {
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, []);
+
+  // Compass/Magnetometer functions
+  const startCompassTracking = async () => {
+    try {
+      // Check if magnetometer is available
+      const isAvailable = await Magnetometer.isAvailableAsync();
+      if (!isAvailable) {
+        return null;
+      }
+
+      // Set update interval (100ms for smooth real-time updates)
+      Magnetometer.setUpdateInterval(100);
+      
+      // Start magnetometer subscription
+      const subscription = Magnetometer.addListener((magnetometerData) => {
+        const { x, y } = magnetometerData;
+        
+        // Calculate heading in degrees (0-360)
+        let heading = Math.atan2(y, x) * (180 / Math.PI);
+        
+        // Normalize to 0-360 degrees
+        if (heading < 0) {
+          heading += 360;
+        }
+        
+        // Adjust for phone orientation (portrait mode - top of phone as reference)
+        // Subtract 90 degrees so the top of the phone points in the direction
+        heading = (heading - 90 + 360) % 360;
+        
+        setPhoneHeading(heading);
+      });
+
+      return subscription;
+    } catch (error) {
+      console.error("Error starting compass tracking:", error);
+      return null;
+    }
+  };
+
+  const stopCompassTracking = () => {
+    if (magnetometerSubscription) {
+      magnetometerSubscription.remove();
+      setMagnetometerSubscription(null);
+      setPhoneHeading(null);
+    }
+  };
+
+  // useEffect for managing compass tracking
+  useEffect(() => {
+    // Start compass tracking when weather data is available and we have wind info
+    const shouldTrackCompass = 
+      weatherData && 
+      weatherData.current && 
+      weatherData.current.wind_mph > 0;
+    
+    const setupCompassTracking = async () => {
+      if (shouldTrackCompass && !magnetometerSubscription) {
+        // Start compass tracking
+        const subscription = await startCompassTracking();
+        if (subscription) {
+          setMagnetometerSubscription(subscription);
+        }
+      } else if (!shouldTrackCompass && magnetometerSubscription) {
+        // Stop compass tracking
+        stopCompassTracking();
+      }
+    };
+    
+    setupCompassTracking();
+    
+    // Cleanup on component unmount
+    return () => {
+      stopCompassTracking();
+    };
+  }, [weatherData]);
+
+  // Clean up compass subscription when component unmounts
+  useEffect(() => {
+    return () => {
+      stopCompassTracking();
+    };
   }, []);
 
   const fetchTokenAndSetUserID = async () => {
@@ -129,6 +436,113 @@ export default function RoundInput() {
       setLoading(false);
     }
   };
+
+  const fetchCourseWeather = async (lat: number, lon: number) => {
+    const WEATHER_API_KEY = Constants.expoConfig?.extra?.WEATHER_API_KEY;
+    const WEATHER_URL = Constants.expoConfig?.extra?.WEATHER_URL;
+
+    // Clear previous errors
+    setWeatherError(null);
+    setWeatherDebugInfo(null);
+
+    // Debug info for UI
+    const debugInfo: any = {
+      hasApiKey: !!WEATHER_API_KEY,
+      hasUrl: !!WEATHER_URL,
+      coordinates: { lat, lon },
+      timestamp: new Date().toISOString(),
+      buildType: __DEV__ ? 'Development' : 'Production',
+      platform: 'iOS',
+    };
+
+    if (!WEATHER_API_KEY || !WEATHER_URL) {
+      const errorMsg = `Weather API not configured: ${!WEATHER_API_KEY ? 'No API Key' : ''} ${!WEATHER_URL ? 'No URL' : ''}`;
+      setWeatherError(errorMsg);
+      setWeatherDebugInfo(JSON.stringify(debugInfo, null, 2));
+      return;
+    }
+
+    setLoadingWeather(true);
+    try {
+      // Ensure HTTPS for iOS production builds
+      const baseUrl = WEATHER_URL.startsWith('https://') ? WEATHER_URL : WEATHER_URL.replace('http://', 'https://');
+      const weatherApiUrl = `${baseUrl}/current.json?key=${WEATHER_API_KEY}&q=${lat},${lon}&aqi=no`;
+      
+      debugInfo.requestUrl = weatherApiUrl.replace(WEATHER_API_KEY, 'API_KEY_HIDDEN');
+      debugInfo.isHttps = baseUrl.startsWith('https://');
+
+      const response = await fetch(weatherApiUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "SwingSync/1.0.2 (iOS)",
+          "Accept": "application/json",
+          "Cache-Control": "no-cache",
+        },
+      });
+
+      debugInfo.responseStatus = response.status;
+      debugInfo.responseOk = response.ok;
+      debugInfo.responseHeaders = Object.fromEntries(response.headers.entries());
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        debugInfo.errorResponse = errorText;
+        setWeatherError(`Weather API HTTP ${response.status}: ${errorText}`);
+        setWeatherDebugInfo(JSON.stringify(debugInfo, null, 2));
+        return;
+      }
+
+      const data = await response.json();
+      debugInfo.success = true;
+      debugInfo.weatherData = {
+        location: data.location?.name,
+        temperature: data.current?.temp_f,
+        condition: data.current?.condition?.text,
+        windSpeed: data.current?.wind_mph
+      };
+      
+      setWeatherData(data);
+      setWeatherDebugInfo(JSON.stringify(debugInfo, null, 2));
+      
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      debugInfo.fetchError = errorMsg;
+      debugInfo.errorStack = error instanceof Error ? error.stack : undefined;
+      
+      // More specific error detection for iOS
+      if (errorMsg.includes('Network request failed')) {
+        debugInfo.errorType = 'iOS Network Security - Possible ATS blocking HTTP requests';
+        debugInfo.solution = 'Check app.json for NSAppTransportSecurity configuration';
+      } else if (errorMsg.includes('timeout')) {
+        debugInfo.errorType = 'Request timeout';
+      } else if (errorMsg.includes('SSL') || errorMsg.includes('TLS')) {
+        debugInfo.errorType = 'SSL/TLS certificate issue';
+      } else if (errorMsg.includes('CORS')) {
+        debugInfo.errorType = 'CORS policy blocking request';
+      } else {
+        debugInfo.errorType = 'Unknown network error';
+      }
+      
+      setWeatherError(`Network Error: ${errorMsg}`);
+      setWeatherDebugInfo(JSON.stringify(debugInfo, null, 2));
+      setWeatherData(null);
+    } finally {
+      setLoadingWeather(false);
+    }
+  };
+
+  // Fetch weather when course is selected
+  useEffect(() => {
+    if (selectedCourse && selectedCourse.location && typeof selectedCourse.location === 'object') {
+      const { latitude, longitude } = selectedCourse.location;
+      if (latitude && longitude) {
+        fetchCourseWeather(latitude, longitude);
+      }
+    } else {
+      setWeatherData(null);
+    }
+  }, [selectedCourse]);
 
   useEffect(() => {
     let active = true;
@@ -274,7 +688,6 @@ export default function RoundInput() {
         const data = await response.json();
         if (!currentDraftId) {
           setCurrentDraftId(data.draft_id);
-          console.log("Draft saved with ID:", data.draft_id);
         }
       }
     } catch (error) {
@@ -311,6 +724,11 @@ export default function RoundInput() {
         
         const totalStrokes = teeShots + putts + penalties + chips + approach;
         updated[currentHole].strokes = totalStrokes > 0 ? totalStrokes.toString() : null;
+        
+        // Auto-calculate GIR
+        if (totalStrokes > 0 && putts > 0) {
+          updated[currentHole].gir = calculateGIR(totalStrokes, hole.par, putts);
+        }
       }
       
       return updated;
@@ -506,7 +924,6 @@ export default function RoundInput() {
     }
     
     setIsSaving(true);
-    console.log("Starting save of round to backend...");
     
     try {
       const payload = {
@@ -538,7 +955,6 @@ export default function RoundInput() {
         }),
       };
       
-      console.log("Saving round with payload:", JSON.stringify(payload, null, 2));
       
       const roundEndpoint = `${BACKEND_URL}/api/rounds/`;
       const res = await fetch(roundEndpoint, {
@@ -550,7 +966,6 @@ export default function RoundInput() {
         body: JSON.stringify(payload),
       });
       
-      console.log("Round save response status:", res.status);
       
       let responseData;
       try {
@@ -574,7 +989,6 @@ export default function RoundInput() {
             },
           });
           if (deleteRes.ok) {
-            console.log("Draft deleted after successful round save");
             setCurrentDraftId(null);
             setDrafts((prev: Draft[]) => prev.filter((d: Draft) => d.draft_id !== currentDraftId));
           } else {
@@ -639,6 +1053,39 @@ export default function RoundInput() {
     showAlert("Draft loaded successfully!", "success");
   };
 
+  // Update running stats whenever scores change
+  useEffect(() => {
+    const stats = scores.reduce((acc, s, index) => {
+      if (index > currentHole) return acc; // Only count completed holes
+      
+      const strokes = s.strokes ? parseInt(s.strokes) : 0;
+      const putts = s.putts ? parseInt(s.putts) : 0;
+      const penalties = s.penalties ? parseInt(s.penalties) : 0;
+      
+      if (strokes > 0) {
+        acc.totalScore += strokes;
+        acc.totalPutts += putts;
+        acc.totalPenalties += penalties;
+        acc.fairwaysHit += s.fairway ? 1 : 0;
+        acc.girs += s.gir ? 1 : 0;
+        acc.holesCompleted += 1;
+        acc.strokesGained += (s.par - strokes); // Positive = under par
+      }
+      
+      return acc;
+    }, {
+      totalScore: 0,
+      totalPutts: 0,
+      totalPenalties: 0,
+      fairwaysHit: 0,
+      girs: 0,
+      holesCompleted: 0,
+      strokesGained: 0
+    });
+    
+    setRunningStats(stats);
+  }, [scores, currentHole]);
+
   const totalScore = scores.reduce((sum, s) => {
     const putts    = s.putts    && s.putts    !== "" ? parseInt(s.putts)    : 0;
     const penalties= s.penalties&& s.penalties!== "" ? parseInt(s.penalties): 0;
@@ -679,59 +1126,67 @@ export default function RoundInput() {
   if (showSummary) {
     return (
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={styles.outerContainer}>
-          <Card style={styles.card}>
-            <Card.Title
-              title="Round Summary"
-              titleStyle={styles.summaryTitle}
-              subtitle={new Date().toLocaleDateString()}
-              subtitleStyle={styles.summarySubtitle}
-            />
+        <ScrollView
+          style={styles.summaryContainer}
+          contentContainerStyle={styles.summaryScrollContent}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Card style={styles.summaryCard}>
+            <View style={styles.summaryHeader}>
+              <MaterialCommunityIcons name="golf" size={32} color="#00BFFF" />
+              <Text style={styles.summaryTitle}>Round Complete!</Text>
+              <Text style={styles.summarySubtitle}>{new Date().toLocaleDateString()}</Text>
+            </View>
+            
             <Divider style={styles.summaryDivider} />
+            
             <Card.Content style={styles.summaryContent}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Course</Text>
-                <Text style={styles.summaryValue}>{selectedCourse?.course_name || "Unknown"}</Text>
+              <View style={styles.summaryGrid}>
+                <View style={styles.summaryMainStats}>
+                  <View style={styles.scoreBadge}>
+                    <Text style={styles.scoreBadgeLabel}>Final Score</Text>
+                    <Text style={styles.scoreBadgeValue}>{totalScore}</Text>
+                    <Text style={styles.scoreBadgeSubtext}>
+                      {totalScore - scores.reduce((sum, s) => sum + s.par, 0) === 0 ? 'Even Par' :
+                       totalScore - scores.reduce((sum, s) => sum + s.par, 0) > 0 ? 
+                       `+${totalScore - scores.reduce((sum, s) => sum + s.par, 0)}` :
+                       `${totalScore - scores.reduce((sum, s) => sum + s.par, 0)}`}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.summaryStatsGrid}>
+                  <View style={styles.statBox}>
+                    <MaterialCommunityIcons name="golf-tee" size={20} color="#4CAF50" />
+                    <Text style={styles.statValue}>{totalPutts}</Text>
+                    <Text style={styles.statLabel}>Putts</Text>
+                  </View>
+                  
+                  <View style={styles.statBox}>
+                    <MaterialCommunityIcons name="flag" size={20} color="#FF9800" />
+                    <Text style={styles.statValue}>{fairwaysHit}</Text>
+                    <Text style={styles.statLabel}>Fairways</Text>
+                  </View>
+                  
+                  <View style={styles.statBox}>
+                    <MaterialCommunityIcons name="target" size={20} color="#00BFFF" />
+                    <Text style={styles.statValue}>{girs}</Text>
+                    <Text style={styles.statLabel}>GIRs</Text>
+                  </View>
+                  
+                  <View style={styles.statBox}>
+                    <MaterialCommunityIcons name="alert" size={20} color="#F44336" />
+                    <Text style={styles.statValue}>{totalPenalties}</Text>
+                    <Text style={styles.statLabel}>Penalties</Text>
+                  </View>
+                </View>
               </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Tee</Text>
-                <Text style={styles.summaryValue}>{selectedTee}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Gender</Text>
-                <Text style={styles.summaryValue}>{selectedGender}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Total Score</Text>
-                <Text style={styles.summaryValue}>{totalScore}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Putts</Text>
-                <Text style={styles.summaryValue}>{totalPutts}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Penalties</Text>
-                <Text style={styles.summaryValue}>{totalPenalties}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Chip Shots</Text>
-                <Text style={styles.summaryValue}>{totalChips}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Approach Shots</Text>
-                <Text style={styles.summaryValue}>{totalApproach}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Tee Shots</Text>
-                <Text style={styles.summaryValue}>{totalTee}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Fairways Hit</Text>
-                <Text style={styles.summaryValue}>{fairwaysHit}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>GIRs</Text>
-                <Text style={styles.summaryValue}>{girs}</Text>
+
+              <View style={styles.courseInfoCard}>
+                <Text style={styles.courseInfoTitle}>{selectedCourse?.course_name}</Text>
+                <Text style={styles.courseInfoDetails}>{selectedTee} Tees • {selectedGender}</Text>
               </View>
 
               <TextInput
@@ -739,51 +1194,47 @@ export default function RoundInput() {
                 mode="outlined"
                 value={notes}
                 onChangeText={setNotes}
-                style={styles.input}
+                style={styles.notesInput}
                 outlineColor="rgba(255,255,255,0.3)"
                 activeOutlineColor="#00BFFF"
                 textColor="#FFFFFF"
                 placeholderTextColor="rgba(255,255,255,0.5)"
                 theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
                 multiline
-                blurOnSubmit={true}
+                numberOfLines={3}
                 placeholder="Weather, course conditions, memorable shots..."
               />
             </Card.Content>
-            <Card.Actions style={{ justifyContent: "center", flexDirection: 'column', gap: 10 }}>
+            
+            <Card.Actions style={styles.summaryActions}>
               <Button
                 mode="outlined"
-                style={styles.button}
+                style={styles.summaryButton}
                 onPress={() => setShowSummary(false)}     
                 textColor="#00BFFF"
+                icon="pencil"
               >
-                Back to Edit
+                Edit Round
               </Button>
               <Button 
                 mode="contained" 
-                style={styles.button}
+                style={[styles.summaryButton, styles.saveButton]}
                 onPress={handleSummaryFinish}
                 loading={isSaving}
                 disabled={isSaving}
+                icon="check-circle"
               >
-                Save & Finish Round
-              </Button>
-              <Button 
-                mode="outlined" 
-                style={styles.button}
-                onPress={() => router.push('/ViewRounds')}
-                textColor="#00BFFF"
-              >
-                View My Rounds
+                Save Round
               </Button>
             </Card.Actions>
           </Card>
+          
           {alert.open && (
             <View style={styles.snackbar}>
               <Text style={{ color: alert.severity === "error" ? "#ff6b6b" : "#51cf66" }}>{alert.message}</Text>
             </View>
           )}
-        </View>
+        </ScrollView>
       </TouchableWithoutFeedback>
     );
   }
@@ -800,202 +1251,396 @@ export default function RoundInput() {
     })();
     
     const scoreToPar = currentStrokes - (s.par || 0);
-    const getScoreColors = () => {
-      if (currentStrokes === 0) {
-        return {
-          backgroundColor: 'rgba(0, 191, 255, 0.12)',
-          borderColor: 'rgba(0, 191, 255, 0.2)',
-          textColor: '#fff',
-          textShadow: 'rgba(0, 191, 255, 0.5)'
-        };
-      }
-      
-      if (scoreToPar < 0) {
-        return {
-          backgroundColor: 'rgba(76, 175, 80, 0.15)',
-          borderColor: 'rgba(76, 175, 80, 0.3)',
-          textColor: '#4CAF50',
-          textShadow: 'rgba(76, 175, 80, 0.6)'
-        };
-      } else if (scoreToPar === 0) {
-        return {
-          backgroundColor: 'rgba(0, 191, 255, 0.12)',
-          borderColor: 'rgba(0, 191, 255, 0.2)',
-          textColor: '#00BFFF',
-          textShadow: 'rgba(0, 191, 255, 0.5)'
-        };
-      } else if (scoreToPar === 1) {
-        return {
-          backgroundColor: 'rgba(255, 193, 7, 0.12)',
-          borderColor: 'rgba(255, 193, 7, 0.25)',
-          textColor: '#FFC107',
-          textShadow: 'rgba(255, 193, 7, 0.5)'
-        };
-      } else {
-        return {
-          backgroundColor: 'rgba(244, 67, 54, 0.12)',
-          borderColor: 'rgba(244, 67, 54, 0.25)',
-          textColor: '#F44336',
-          textShadow: 'rgba(244, 67, 54, 0.5)'
-        };
-      }
-    };
+    const weatherImpacts = getWeatherImpact(weatherData);
     
-    const scoreColors = getScoreColors();
     
     return (
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={styles.outerContainer}>
-          <Card style={styles.compactCard}>
-            <View style={styles.compactHeader}>
+        <ScrollView 
+          style={styles.playingContainer}
+          contentContainerStyle={styles.playingContent}
+          showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Running Stats Header */}
+          <View style={styles.runningStatsHeader}>
+            <View style={styles.runningStatsContainer}>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>{runningStats.totalScore}</Text>
+                <Text style={styles.statPillLabel}>Score</Text>
+              </View>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>{runningStats.strokesGained >= 0 ? `+${runningStats.strokesGained}` : runningStats.strokesGained}</Text>
+                <Text style={styles.statPillLabel}>To Par</Text>
+              </View>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>{runningStats.girs}</Text>
+                <Text style={styles.statPillLabel}>GIRs</Text>
+              </View>
+              <View style={styles.statPill}>
+                <Text style={styles.statPillValue}>{runningStats.totalPutts}</Text>
+                <Text style={styles.statPillLabel}>Putts</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Weather Impact Section - Now always shows when started for testing */}
+          <View style={styles.weatherImpactCard}>
+            <TouchableOpacity 
+              style={styles.weatherImpactHeader}
+              onPress={() => setShowWeatherImpact(!showWeatherImpact)}
+            >
+              <View style={styles.weatherImpactHeaderContent}>
+                <MaterialCommunityIcons name="weather-partly-cloudy" size={20} color="#00BFFF" />
+                <Text style={styles.weatherImpactTitle}>Weather Impact</Text>
+                <View style={styles.weatherImpactBadge}>
+                  <Text style={styles.weatherImpactBadgeText}>{weatherImpacts?.length || 0}</Text>
+                </View>
+              </View>
+              <MaterialCommunityIcons 
+                name={showWeatherImpact ? "chevron-up" : "chevron-down"} 
+                size={20} 
+                color="#00BFFF" 
+              />
+            </TouchableOpacity>
+            
+            {showWeatherImpact && (
+              <View style={styles.weatherImpactContent}>
+                {weatherData ? (
+                  weatherImpacts && weatherImpacts.length > 0 ? (
+                    weatherImpacts.map((impact, index) => (
+                      <View key={index} style={styles.weatherImpactItem}>
+                        <MaterialCommunityIcons name={impact.icon as any} size={18} color={impact.color} />
+                        <View style={styles.weatherImpactItemContent}>
+                          <Text style={styles.weatherImpactItemTitle}>{impact.title}</Text>
+                          <Text style={styles.weatherImpactItemEffect}>{impact.effect}</Text>
+                        </View>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={styles.weatherImpactItem}>
+                      <MaterialCommunityIcons name="weather-sunny" size={18} color="#4CAF50" />
+                      <View style={styles.weatherImpactItemContent}>
+                        <Text style={styles.weatherImpactItemTitle}>Perfect Conditions</Text>
+                        <Text style={styles.weatherImpactItemEffect}>Weather conditions are ideal for golf. No adjustments needed.</Text>
+                      </View>
+                    </View>
+                  )
+                ) : (
+                  <View style={styles.weatherImpactItem}>
+                    <MaterialCommunityIcons name="cloud-alert" size={18} color="#FF6B6B" />
+                    <View style={styles.weatherImpactItemContent}>
+                      <Text style={styles.weatherImpactItemTitle}>No Weather Data</Text>
+                      <Text style={styles.weatherImpactItemEffect}>Weather information is not available for this course.</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Compass Instruction - Shows when wind data is available but compass is not active */}
+          {weatherData && weatherData.current && weatherData.current.wind_mph > 0 && phoneHeading === null && (
+            <View style={styles.compassInstructionCard}>
+              <View style={styles.compassInstructionHeader}>
+                <MaterialCommunityIcons name="compass-outline" size={20} color="#FFA726" />
+                <Text style={styles.compassInstructionTitle}>Live Wind Analysis Available</Text>
+              </View>
+              <View style={styles.compassInstructionContent}>
+                <Text style={styles.compassInstructionText}>
+                  Point your phone in the direction you want to hit the ball to see real-time wind effects on your shot distance.
+                </Text>
+                <View style={styles.compassInstructionSteps}>
+                  <Text style={styles.compassInstructionStep}>📱 Hold phone upright</Text>
+                  <Text style={styles.compassInstructionStep}>🎯 Point toward your target</Text>
+                  <Text style={styles.compassInstructionStep}>📊 See live wind impact</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Live Compass Widget - Shows when wind data and phone heading are available */}
+          {weatherData && weatherData.current && weatherData.current.wind_mph > 0 && phoneHeading !== null && (
+            <View style={styles.compassCard}>
+              <View style={styles.compassHeader}>
+                <MaterialCommunityIcons name="compass-outline" size={20} color="#00BFFF" />
+                <Text style={styles.compassTitle}>Live Wind Direction</Text>
+                <View style={styles.compassBadge}>
+                  <Text style={styles.compassBadgeText}>LIVE</Text>
+                </View>
+              </View>
+              
+              <View style={styles.compassContent}>
+                {/* Compass Circle */}
+                <View style={styles.compassCircle}>
+                  {/* Cardinal directions */}
+                  <Text style={[styles.compassDirection, styles.compassNorth]}>N</Text>
+                  <Text style={[styles.compassDirection, styles.compassEast]}>E</Text>
+                  <Text style={[styles.compassDirection, styles.compassSouth]}>S</Text>
+                  <Text style={[styles.compassDirection, styles.compassWest]}>W</Text>
+                  
+                  {/* Phone direction indicator */}
+                  <View 
+                    style={[
+                      styles.compassPhoneIndicator, 
+                      { transform: [{ rotate: `${phoneHeading}deg` }] }
+                    ]}
+                  >
+                    <View style={styles.compassPhoneArrow} />
+                  </View>
+                  
+                  {/* Wind direction indicator */}
+                  <View 
+                    style={[
+                      styles.compassWindIndicator, 
+                      { transform: [{ rotate: `${windDirectionToDegrees(weatherData.current.wind_dir)}deg` }] }
+                    ]}
+                  >
+                    <View style={styles.compassWindArrow} />
+                  </View>
+                  
+                  {/* Center dot */}
+                  <View style={styles.compassCenter} />
+                </View>
+                
+                {/* Wind effect display */}
+                <View style={styles.windEffectContainer}>
+                  {(() => {
+                    const windDegrees = windDirectionToDegrees(weatherData.current.wind_dir);
+                    const relative = getWindRelativeDirection(phoneHeading, windDegrees);
+                    const windSpeed = weatherData.current.wind_mph;
+                    
+                    const headwindYards = Math.round(windSpeed * 2);
+                    const tailwindYards = Math.round(windSpeed * 1.5);
+                    const crosswindYards = Math.round(windSpeed * 0.8);
+                    
+                    let effectText = "";
+                    let effectColor = "#00BFFF";
+                    let effectIcon = "weather-windy";
+                    
+                    if (relative.type === 'headwind') {
+                      effectText = `${headwindYards} yards AGAINST you`;
+                      effectColor = "#FF6B6B";
+                      effectIcon = "arrow-down-thick";
+                    } else if (relative.type === 'tailwind') {
+                      effectText = `+${tailwindYards} yards WITH you`;
+                      effectColor = "#4CAF50";
+                      effectIcon = "arrow-up-thick";
+                    } else {
+                      effectText = `±${crosswindYards} yards crosswind`;
+                      effectColor = "#FFA726";
+                      effectIcon = "arrow-left-right";
+                    }
+                    
+                    return (
+                      <View style={styles.windEffectDisplay}>
+                        <MaterialCommunityIcons name={effectIcon as any} size={24} color={effectColor} />
+                        <Text style={[styles.windEffectText, { color: effectColor }]}>{effectText}</Text>
+                      </View>
+                    );
+                  })()}
+                  
+                  {/* Current readings */}
+                  <View style={styles.compassReadings}>
+                    <View style={styles.compassReading}>
+                      <Text style={styles.compassReadingLabel}>Phone</Text>
+                      <Text style={styles.compassReadingValue}>{Math.round(phoneHeading)}°</Text>
+                    </View>
+                    <View style={styles.compassReading}>
+                      <Text style={styles.compassReadingLabel}>Wind</Text>
+                      <Text style={styles.compassReadingValue}>{weatherData.current.wind_dir}</Text>
+                    </View>
+                    <View style={styles.compassReading}>
+                      <Text style={styles.compassReadingLabel}>Speed</Text>
+                      <Text style={styles.compassReadingValue}>{weatherData.current.wind_mph} mph</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </View>
+          )}
+
+          <Card style={styles.holeCard}>
+            <View style={styles.holeHeader}>
               <TouchableOpacity
                 onPress={() => {
                   setSkipLoadMostRecent(true);
                   clearDraftState();
-                  showAlert("Round unloaded", "info");
+                  showAlert("Round ended", "info");
                 }}
-                style={styles.exitButtonAbsolute}
+                style={styles.exitButton}
               >
-                <MaterialCommunityIcons name="close" size={20} color="#ff6b6b" />
+                <MaterialCommunityIcons name="close-circle" size={24} color="#ff6b6b" />
               </TouchableOpacity>
-              <View style={styles.headerTextContainer}>
-                <Text style={styles.cardTitle}>Hole {s.hole_number || currentHole + 1}</Text>
-                <Text style={styles.cardSubtitle}>Par {s.par} • {s.yardage} yards</Text>
-              </View>
-            </View>
-            
-            <Card.Content style={styles.compactContent}>
-              <View style={styles.scoreHeader}>
-                <View style={[
-                  styles.scoreDisplayCard,
-                  {
-                    backgroundColor: scoreColors.backgroundColor,
-                    borderColor: scoreColors.borderColor,
-                  }
-                ]}>
-                  <Text style={styles.scoreDisplayLabel}>Total Strokes</Text>
-                  <Text style={[
-                    styles.scoreDisplayValue,
-                    {
-                      color: scoreColors.textColor,
-                      textShadowColor: scoreColors.textShadow,
-                    }
-                  ]}>
-                    {currentStrokes}
-                  </Text>
-                  {currentStrokes > 0 && (
-                    <Text style={[
-                      styles.scoreToPar,
-                      { color: scoreColors.textColor }
-                    ]}>
-                      {scoreToPar === 0 ? 'Even' : scoreToPar > 0 ? `+${scoreToPar}` : `${scoreToPar}`}
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.progressSection}>
-                  <Text style={styles.progressText}>Hole {currentHole + 1} of {scores.length}</Text>
-                  <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { width: `${((currentHole + 1) / scores.length) * 100}%` }]} />
+              
+              <View style={styles.holeInfo}>
+                <Text style={styles.holeNumber}>HOLE {s.hole_number || currentHole + 1}</Text>
+                <View style={styles.holeDetails}>
+                  <View style={styles.holeDetailItem}>
+                    <MaterialCommunityIcons name="flag" size={16} color="#00BFFF" />
+                    <Text style={styles.holeDetailText}>Par {s.par}</Text>
+                  </View>
+                  <View style={styles.holeDetailItem}>
+                    <MaterialCommunityIcons name="map-marker-distance" size={16} color="#00BFFF" />
+                    <Text style={styles.holeDetailText}>{s.yardage} yds</Text>
                   </View>
                 </View>
               </View>
 
-              <View style={styles.primaryStatsSection}>
-                <Text style={styles.sectionTitle}>Shot Details</Text>
-                <View style={styles.primaryStatsGrid}>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Putts</Text>
+              <View style={styles.progressIndicator}>
+                <Text style={styles.progressText}>{currentHole + 1}/{scores.length}</Text>
+                <View style={styles.progressBarContainer}>
+                  <View style={[styles.progressBar, { width: `${((currentHole + 1) / scores.length) * 100}%` }]} />
+                </View>
+              </View>
+            </View>
+
+            <Card.Content style={styles.holeContent}>
+              {/* Current Score Display */}
+              <View style={styles.currentScoreSection}>
+                <View style={[styles.scoreDisplay, getScoreDisplayStyle(currentStrokes, s.par)]}>
+                  <Text style={styles.scoreDisplayNumber}>{currentStrokes || 0}</Text>
+                  <Text style={styles.scoreDisplayLabel}>
+                    {currentStrokes === 0 ? 'STROKES' : 
+                     scoreToPar === 0 ? 'PAR' :
+                     scoreToPar < 0 ? (scoreToPar === -1 ? 'BIRDIE' : scoreToPar === -2 ? 'EAGLE' : 'AMAZING!') :
+                     scoreToPar === 1 ? 'BOGEY' : 'DOUBLE+'}
+                  </Text>
+                </View>
+                
+                {/* GIR Auto-Indicator */}
+                {currentStrokes > 0 && s.putts && parseInt(s.putts) > 0 && (
+                  <View style={[styles.girIndicator, s.gir && styles.girIndicatorActive]}>
+                    <MaterialCommunityIcons 
+                      name={s.gir ? "target" : "target-account"} 
+                      size={16} 
+                      color={s.gir ? "#4CAF50" : "rgba(255,255,255,0.5)"} 
+                    />
+                    <Text style={[styles.girText, s.gir && styles.girTextActive]}>
+                      {s.gir ? "Green in Regulation!" : "Missed GIR"}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* GPS Distance */}
+              {selectedCourse && SUPPORTED_COURSES_WITH_GPS.includes(selectedCourse.course_name) && (
+                <View style={styles.gpsSection}>
+                  <MaterialCommunityIcons name="crosshairs-gps" size={18} color="#00BFFF" />
+                  <Text style={styles.gpsText}>
+                    {distanceToHole !== null ? `${distanceToHole} yards to pin` : "Getting GPS..."}
+                  </Text>
+                </View>
+              )}
+
+              {/* Shot Input Grid */}
+              <View style={styles.inputSection}>
+                <Text style={styles.sectionTitle}>Shot Breakdown</Text>
+                <View style={styles.inputGrid}>
+                  <View style={styles.inputCard}>
+                    <MaterialCommunityIcons name="golf-tee" size={20} color="#4CAF50" />
+                    <Text style={styles.inputLabel}>Putts</Text>
                     <TextInput
                       mode="outlined"
                       value={s.putts?.toString() ?? ""}
                       onChangeText={v => handleScoreChange("putts", v.replace(/[^0-9]/g, ""))}
                       keyboardType="numeric"
-                      style={styles.statInput}
+                      style={styles.inputField}
                       outlineColor="rgba(255,255,255,0.2)"
-                      activeOutlineColor="#00BFFF"
+                      activeOutlineColor="#4CAF50"
                       textColor="#FFFFFF"
                       placeholder="0"
-                      contentStyle={styles.inputContent}
                       dense
                     />
                   </View>
 
-                  <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Approach</Text>
+                  <View style={styles.inputCard}>
+                    <MaterialCommunityIcons name="golf" size={20} color="#FF9800" />
+                    <Text style={styles.inputLabel}>Approach</Text>
                     <TextInput
                       mode="outlined"
                       value={s.approach?.toString() ?? ""}
                       onChangeText={v => handleScoreChange("approach", v.replace(/[^0-9]/g, ""))}
                       keyboardType="numeric"
-                      style={styles.statInput}
+                      style={styles.inputField}
                       outlineColor="rgba(255,255,255,0.2)"
-                      activeOutlineColor="#00BFFF"
+                      activeOutlineColor="#FF9800"
                       textColor="#FFFFFF"
                       placeholder="0"
-                      contentStyle={styles.inputContent}
                       dense
                     />
                   </View>
 
-                  <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Chips</Text>
+                  <View style={styles.inputCard}>
+                    <MaterialCommunityIcons name="golf-cart" size={20} color="#9C27B0" />
+                    <Text style={styles.inputLabel}>Chips</Text>
                     <TextInput
                       mode="outlined"
                       value={s.chips?.toString() ?? ""}
                       onChangeText={v => handleScoreChange("chips", v.replace(/[^0-9]/g, ""))}
                       keyboardType="numeric"
-                      style={styles.statInput}
+                      style={styles.inputField}
                       outlineColor="rgba(255,255,255,0.2)"
-                      activeOutlineColor="#00BFFF"
+                      activeOutlineColor="#9C27B0"
                       textColor="#FFFFFF"
                       placeholder="0"
-                      contentStyle={styles.inputContent}
                       dense
                     />
                   </View>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statLabel}>Penalties</Text>
+
+                  <View style={styles.inputCard}>
+                    <MaterialCommunityIcons name="alert-circle" size={20} color="#F44336" />
+                    <Text style={styles.inputLabel}>Penalties</Text>
                     <TextInput
                       mode="outlined"
                       value={s.penalties?.toString() ?? ""}
                       onChangeText={v => handleScoreChange("penalties", v.replace(/[^0-9]/g, ""))}
                       keyboardType="numeric"
-                      style={[styles.statInput, styles.penaltyInput]}
-                      outlineColor="rgba(255,107,107,0.3)"
-                      activeOutlineColor="#FF6B6B"
+                      style={[styles.inputField, styles.penaltyField]}
+                      outlineColor="rgba(244,67,54,0.3)"
+                      activeOutlineColor="#F44336"
                       textColor="#FFFFFF"
                       placeholder="0"
-                      contentStyle={styles.inputContent}
                       dense
                     />
                   </View>
                 </View>
               </View>
 
+              {/* Performance Toggles */}
               <View style={styles.performanceSection}>
                 <Text style={styles.sectionTitle}>Performance</Text>
-                <View style={styles.switchContainer}>
+                <View style={styles.toggleContainer}>
                   {s.par > 3 && (
-                    <View style={styles.switchItem}>
-                      <Text style={styles.performanceLabel}>Fairway Hit</Text>
+                    <View style={styles.toggleCard}>
+                      <View style={styles.toggleInfo}>
+                        <MaterialCommunityIcons name="flag-checkered" size={20} color="#4CAF50" />
+                        <Text style={styles.toggleLabel}>Fairway Hit</Text>
+                      </View>
                       <Switch 
                         value={!!s.fairway} 
                         onValueChange={v => handleScoreChange("fairway", v)} 
-                        color="#4CAF50"
+                        thumbColor={s.fairway ? "#4CAF50" : "#666"}
+                        trackColor={{false: "rgba(255,255,255,0.2)", true: "rgba(76,175,80,0.3)"}}
                       />
                     </View>
                   )}
-                  <View style={styles.switchItem}>
-                    <Text style={styles.performanceLabel}>Green in Regulation                </Text>
-                    <Switch 
-                      value={!!s.gir} 
-                      onValueChange={v => handleScoreChange("gir", v)} 
-                      color="#4CAF50"
-                    />
+                  
+                  <View style={styles.toggleCard}>
+                    <View style={styles.toggleInfo}>
+                      <MaterialCommunityIcons name="target" size={20} color="#00BFFF" />
+                      <Text style={styles.toggleLabel}>Green in Regulation</Text>
+                      <Text style={styles.toggleSubtext}>Auto-calculated</Text>
+                    </View>
+                    <View style={[styles.autoIndicator, s.gir && styles.autoIndicatorActive]}>
+                      <Text style={styles.autoText}>{s.gir ? "YES" : "NO"}</Text>
+                    </View>
                   </View>
                 </View>
               </View>
 
+              {/* Navigation */}
               <View style={styles.navigationSection}>
                 <Button 
                   mode="outlined" 
@@ -1004,8 +1649,9 @@ export default function RoundInput() {
                   disabled={currentHole === 0}
                   icon="chevron-left"
                   textColor={currentHole === 0 ? "#666" : "#00BFFF"}
+                  contentStyle={styles.navButtonContent}
                 >
-                  Back
+                  Previous
                 </Button>
                 
                 {currentHole < scores.length - 1 ? (
@@ -1014,7 +1660,7 @@ export default function RoundInput() {
                     style={[styles.navButton, styles.nextButton]} 
                     onPress={handleNext}
                     icon="chevron-right"
-                    contentStyle={{ flexDirection: 'row-reverse' }}
+                    contentStyle={[styles.navButtonContent, { flexDirection: 'row-reverse' }]}
                   >
                     Next Hole
                   </Button>
@@ -1025,9 +1671,10 @@ export default function RoundInput() {
                     onPress={handleSave} 
                     loading={isSaving}
                     disabled={isSaving}
-                    icon="check"
+                    icon="flag-checkered"
+                    contentStyle={styles.navButtonContent}
                   >
-                    Finish
+                    Finish Round
                   </Button>
                 )}
               </View>
@@ -1041,325 +1688,423 @@ export default function RoundInput() {
               </Text>
             </View>
           )}
-        </View>
+        </ScrollView>
       </TouchableWithoutFeedback>
     );
   }
 
+  // Course Selection Screen - Completely Redesigned
   return (
     <ScrollView
-      horizontal={false}
-      showsHorizontalScrollIndicator={false}
-      bounces={false}
-      alwaysBounceHorizontal={false}
-      style={{ flex: 1 }}
-      contentContainerStyle={[styles.outerContainer, { flexGrow: 1, justifyContent: 'flex-start', paddingTop: 60 }]}
+      style={styles.setupContainer}
+      contentContainerStyle={styles.setupContent}
       keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false}
     >
-      <Text variant="headlineSmall" style={styles.title}>Record a New Round</Text>
-      
-      <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Course Details</Text>
-        <Button 
-          mode="outlined" 
-          onPress={() => setDraftsDialogVisible(true)}
-          icon={({color}) => <MaterialCommunityIcons name="file-document-outline" size={18} color={color} />}
-        >
-          Drafts
-        </Button>
+      <View style={styles.welcomeSection}>
+        <MaterialCommunityIcons name="golf" size={48} color="#00BFFF" />
+        <Text style={styles.welcomeTitle}>Start Your Round</Text>
+        <Text style={styles.welcomeSubtitle}>Track every shot, improve your game</Text>
       </View>
-      
-      <Card style={styles.card}>
-        <Card.Content>
-          <Text style={styles.label}>Course</Text>
-          <TouchableOpacity 
-            style={styles.customPicker}
-            onPress={() => setCourseDialogVisible(true)}
-          >
-            <Text style={[
-              styles.customPickerText, 
-              !selectedCourse && { color: 'rgba(255,255,255,0.5)' }
-            ]}>
-              {selectedCourse?.course_name || "Select a course..."}
-            </Text>
-            <MaterialCommunityIcons name="chevron-down" size={20} color="#fff" />
-          </TouchableOpacity>
-          
-          <Portal>
-            <Dialog 
-              visible={courseDialogVisible} 
-              onDismiss={() => setCourseDialogVisible(false)}
-              style={styles.teeDialog}
+
+      <Card style={styles.setupCard}>
+        <Card.Content style={styles.setupCardContent}>
+          {/* Course Selection */}
+          <View style={styles.selectionSection}>
+            <View style={styles.selectionHeader}>
+              <MaterialCommunityIcons name="golf-tee" size={24} color="#00BFFF" />
+              <Text style={styles.selectionTitle}>Course</Text>
+              <Button 
+                mode="text" 
+                onPress={() => setDraftsDialogVisible(true)}
+                icon="file-document-outline"
+                textColor="#00BFFF"
+                style={styles.draftsButton}
+              >
+                Drafts
+              </Button>
+            </View>
+            
+            <TouchableOpacity 
+              style={[styles.selectionCard, selectedCourse && styles.selectionCardSelected]}
+              onPress={() => setCourseDialogVisible(true)}
             >
-              <Dialog.Title style={styles.teeDialogTitle}>Select Course</Dialog.Title>
-              <Dialog.Content style={styles.teeDialogContent}>
-                <TextInput
-                  label="Search Course"
-                  mode="outlined"
-                  value={courseQuery}
-                  onChangeText={setCourseQuery}
-                  style={styles.dialogInput}
-                  outlineColor="rgba(255,255,255,0.3)"
-                  activeOutlineColor="#00BFFF"
-                  textColor="#FFFFFF"
-                  placeholderTextColor="rgba(255,255,255,0.5)"
-                  theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
-                  placeholder="Search By Club Name"
-                  right={isSearching ? <TextInput.Icon icon="magnify" color="#00BFFF" /> : undefined}
-                />
-                
-                <ScrollView 
-                  style={[
-                    styles.courseScroll,
-                    filteredCourses.length > 0 && {
-                      maxHeight: Math.min(
-                        350,
-                        Math.max(
-                          80,
-                          filteredCourses.length * 58
-                        )
-                      )
-                    }
-                  ]}
-                  showsVerticalScrollIndicator={true}
-                  contentContainerStyle={styles.teeScrollContent}
-                >
-                  {filteredCourses.length > 0 ? (
-                    filteredCourses.map((c: Course) => (
-                      <TouchableOpacity
-                        key={c.id}
-                        style={[
-                          styles.courseOption,
-                          selectedCourse?.id === c.id && styles.courseOptionSelected
-                        ]}
-                        onPress={() => {
-                          setSelectedCourse(c);
-                          setCourseDialogVisible(false);
-                        }}
-                      >
-                        <Text style={[
-                          styles.courseOptionText,
-                          selectedCourse?.id === c.id && styles.courseOptionTextSelected
-                        ]}>
-                          {c.course_name}
-                        </Text>
-                        <Text style={styles.courseLocationText}>
-                          {typeof c.location === 'string' 
-                            ? c.location 
-                            : [c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ')}
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                  ) : (
-                    courseQuery.length >= 3 && !isSearching && (
-                      <Text style={styles.noCoursesText}>No courses found.</Text>
-                    )
-                  )}
-                </ScrollView>
-              </Dialog.Content>
-              <Dialog.Actions>
-                <Button onPress={() => setCourseDialogVisible(false)}>Cancel</Button>
-              </Dialog.Actions>
-            </Dialog>
-          </Portal>
-          
-          <Text style={styles.label}>Gender</Text>
-          <RadioButton.Group onValueChange={v => setSelectedGender(v as any)} value={selectedGender}>
-            <View style={styles.radioRow}>
+              {selectedCourse ? (
+                <View style={styles.selectedCourseContent}>
+                  <Text style={styles.selectedCourseTitle}>{selectedCourse.course_name}</Text>
+                  <Text style={styles.selectedCourseSubtitle}>
+                    {typeof selectedCourse.location === 'string' 
+                      ? selectedCourse.location 
+                      : [selectedCourse.location?.city, selectedCourse.location?.state].filter(Boolean).join(', ')}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.placeholderContent}>
+                  <MaterialCommunityIcons name="map-search" size={24} color="rgba(255,255,255,0.5)" />
+                  <Text style={styles.placeholderText}>Select a course</Text>
+                </View>
+              )}
+              <MaterialCommunityIcons name="chevron-right" size={24} color="#00BFFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Weather Information */}
+          {selectedCourse && (
+            <View style={styles.selectionSection}>
+              <View style={styles.selectionHeader}>
+                <MaterialCommunityIcons name="weather-partly-cloudy" size={24} color="#00BFFF" />
+                <Text style={styles.selectionTitle}>Current Weather</Text>
+                {weatherError && (
+                  <TouchableOpacity
+                    onPress={() => setShowWeatherDebug(!showWeatherDebug)}
+                    style={styles.debugButton}
+                  >
+                    <MaterialCommunityIcons name="bug" size={20} color="#FF6B6B" />
+                  </TouchableOpacity>
+                )}
+              </View>
+              
+              <View style={styles.weatherCard}>
+                {loadingWeather ? (
+                  <View style={styles.weatherLoading}>
+                    <MaterialCommunityIcons name="loading" size={20} color="rgba(255,255,255,0.7)" />
+                    <Text style={styles.weatherLoadingText}>Loading weather...</Text>
+                  </View>
+                ) : weatherData ? (
+                  <View style={styles.weatherContent}>
+                    <View style={styles.weatherMain}>
+                      <MaterialCommunityIcons 
+                        name={getWeatherIcon(weatherData.current.condition.text)} 
+                        size={32} 
+                        color="#00BFFF" 
+                      />
+                      <View style={styles.weatherTemp}>
+                        <Text style={styles.weatherTempValue}>{Math.round(weatherData.current.temp_f)}°F</Text>
+                        <Text style={styles.weatherCondition}>{weatherData.current.condition.text}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.weatherDetails}>
+                      <View style={styles.weatherDetailItem}>
+                        <MaterialCommunityIcons name="weather-windy" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.weatherDetailText}>{weatherData.current.wind_mph} mph</Text>
+                      </View>
+                      <View style={styles.weatherDetailItem}>
+                        <MaterialCommunityIcons name="water-percent" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.weatherDetailText}>{weatherData.current.humidity}%</Text>
+                      </View>
+                      <View style={styles.weatherDetailItem}>
+                        <MaterialCommunityIcons name="eye" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.weatherDetailText}>{weatherData.current.vis_miles} mi</Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.weatherError}>
+                    <MaterialCommunityIcons name="weather-cloudy-alert" size={20} color="#FF6B6B" />
+                    <Text style={styles.weatherErrorText}>
+                      {weatherError || "Weather unavailable"}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              
+              {/* Debug Information Panel */}
+              {weatherError && showWeatherDebug && (
+                <View style={styles.debugPanel}>
+                  <View style={styles.debugHeader}>
+                    <MaterialCommunityIcons name="bug" size={16} color="#FF6B6B" />
+                    <Text style={styles.debugTitle}>Debug Info (TestFlight)</Text>
+                  </View>
+                  <ScrollView style={styles.debugScroll} showsVerticalScrollIndicator={false}>
+                    <Text style={styles.debugText}>{weatherDebugInfo}</Text>
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Gender Selection */}
+          <View style={styles.selectionSection}>
+            <View style={styles.selectionHeader}>
+              <MaterialCommunityIcons name="account" size={24} color="#00BFFF" />
+              <Text style={styles.selectionTitle}>Gender</Text>
+            </View>
+            
+            <View style={styles.genderContainer}>
               <TouchableOpacity 
-                style={{flexDirection: 'row', alignItems: 'center'}} 
+                style={[styles.genderCard, selectedGender === "male" && styles.genderCardSelected]}
                 onPress={() => setSelectedGender("male")}
               >
-                <RadioButton
-                  value="male"
-                  color="#00BFFF"
-                  uncheckedColor="#fff"
-                  status={selectedGender === "male" ? "checked" : "unchecked"}
+                <MaterialCommunityIcons 
+                  name="account" 
+                  size={32} 
+                  color={selectedGender === "male" ? "#00BFFF" : "rgba(255,255,255,0.5)"} 
                 />
-                <Text style={[
-                  styles.radioLabel,
-                  { fontWeight: selectedGender === "male" ? "bold" : "normal", color: selectedGender === "male" ? "#00BFFF" : "#fff" }
-                ]}>
+                <Text style={[styles.genderText, selectedGender === "male" && styles.genderTextSelected]}>
                   Male
                 </Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={{flexDirection: 'row', alignItems: 'center'}} 
+                style={[styles.genderCard, selectedGender === "female" && styles.genderCardSelected]}
                 onPress={() => setSelectedGender("female")}
               >
-                <RadioButton
-                  value="female"
-                  color="#FF69B4"
-                  uncheckedColor='#fff'
-                  status={selectedGender === "female" ? "checked" : "unchecked"}
+                <MaterialCommunityIcons 
+                  name="account" 
+                  size={32} 
+                  color={selectedGender === "female" ? "#FF69B4" : "rgba(255,255,255,0.5)"} 
                 />
-                <Text style={[
-                  styles.radioLabel,
-                  { fontWeight: selectedGender === "female" ? "bold" : "normal", color: selectedGender === "female" ? "#FF69B4" : "#fff" }
-                ]}>
+                <Text style={[styles.genderText, selectedGender === "female" && styles.genderTextSelected]}>
                   Female
                 </Text>
               </TouchableOpacity>
             </View>
-          </RadioButton.Group>
-          
-          <Text style={styles.label}>Tee</Text>
-          <View style={{ width: '100%', marginBottom: 12 }}>
-            <TouchableOpacity 
-              style={styles.customPicker}
-              onPress={() => setTeeDialogVisible(true)}
-            >
-              <Text style={[
-                styles.customPickerText, 
-                !selectedTee && { color: 'rgba(255,255,255,0.5)' }
-              ]}>
-                {selectedTee || "Select a tee..."}
-              </Text>
-              <MaterialCommunityIcons name="chevron-down" size={20} color="#fff" />
-            </TouchableOpacity>
+          </View>
+
+          {/* Tee Selection */}
+          <View style={styles.selectionSection}>
+            <View style={styles.selectionHeader}>
+              <MaterialCommunityIcons name="flag" size={24} color="#00BFFF" />
+              <Text style={styles.selectionTitle}>Tee</Text>
+            </View>
             
-            <Portal>
-              <Dialog 
-                visible={teeDialogVisible} 
-                onDismiss={() => setTeeDialogVisible(false)}
-                style={styles.teeDialog}
+            <TouchableOpacity 
+              style={[styles.selectionCard, selectedTee && styles.selectionCardSelected]}
+              onPress={() => setTeeDialogVisible(true)}
+              disabled={!selectedCourse || !selectedGender}
+            >
+              {selectedTee ? (
+                <Text style={styles.selectedText}>{selectedTee}</Text>
+              ) : (
+                <Text style={styles.placeholderText}>
+                  {!selectedCourse || !selectedGender ? "Select course & gender first" : "Choose tee"}
+                </Text>
+              )}
+              <MaterialCommunityIcons name="chevron-right" size={24} color="#00BFFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Hole Count Selection */}
+          <View style={styles.selectionSection}>
+            <View style={styles.selectionHeader}>
+              <MaterialCommunityIcons name="numeric" size={24} color="#00BFFF" />
+              <Text style={styles.selectionTitle}>Holes</Text>
+            </View>
+            
+            <View style={styles.holeCountContainer}>
+              <TouchableOpacity
+                style={[styles.holeCountCard, holeCountSelection === 9 && styles.holeCountCardSelected]}
+                onPress={() => setHoleCountSelection(9)}
               >
-                <Dialog.Title style={styles.teeDialogTitle}>Select Tee</Dialog.Title>
-                <Dialog.Content style={styles.teeDialogContent}>
-                  {((selectedGender === "male" || selectedGender === "female") && 
-                    selectedCourse?.tees?.[selectedGender]) ? (
-                    <ScrollView 
-                      style={[
-                        styles.teeScroll,
-                        {
-                          maxHeight: Math.min(
-                            350,  
-                            Math.max(
-                              80,
-                              
-                              selectedCourse.tees[selectedGender].length * 58 
-                            )
-                          )
-                        }
-                      ]}
-                      showsVerticalScrollIndicator={true}
-                      contentContainerStyle={styles.teeScrollContent}
-                    >
-                      {selectedCourse.tees[selectedGender].map((tee: TeeInfo) => (
-                        <TouchableOpacity
-                          key={tee.id}
-                          style={[
-                            styles.teeOption,
-                            selectedTee === tee.tee_name && styles.teeOptionSelected
-                          ]}
-                          onPress={() => {
-                            setSelectedTee(tee.tee_name);
-                            setTeeDialogVisible(false);
-                          }}
-                        >
-                          <Text style={[
-                            styles.teeOptionText,
-                            selectedTee === tee.tee_name && styles.teeOptionTextSelected
-                          ]}>
-                            {tee.tee_name}
-                            {tee.course_rating ? ` (CR ${tee.course_rating})` : ''}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  ) : (
-                    <Text style={styles.noTeesText}>
-                      {!selectedGender 
-                        ? "Please select a gender first" 
-                        : !selectedCourse 
-                          ? "Please select a course first" 
-                          : "No tees available for this selection"}
-                    </Text>
-                  )}
-                </Dialog.Content>
-                <Dialog.Actions>
-                  <Button onPress={() => setTeeDialogVisible(false)}>Cancel</Button>
-                </Dialog.Actions>
-              </Dialog>
-            </Portal>
+                <Text style={[styles.holeCountNumber, holeCountSelection === 9 && styles.holeCountNumberSelected]}>9</Text>
+                <Text style={[styles.holeCountLabel, holeCountSelection === 9 && styles.holeCountLabelSelected]}>Holes</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.holeCountCard, holeCountSelection === 18 && styles.holeCountCardSelected]}
+                onPress={() => setHoleCountSelection(18)}
+              >
+                <Text style={[styles.holeCountNumber, holeCountSelection === 18 && styles.holeCountNumberSelected]}>18</Text>
+                <Text style={[styles.holeCountLabel, holeCountSelection === 18 && styles.holeCountLabelSelected]}>Holes</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          
-          <Text style={styles.label}>Number of Holes</Text>
-          <View style={styles.holeSelectRow}>
-            <Button
-              mode={holeCountSelection === 9 ? "contained" : "outlined"}
-              onPress={() => setHoleCountSelection(9)}
-              style={styles.holeSelectButton}
-            >
-              9 Holes
-            </Button>
-            <Button
-              mode={holeCountSelection === 18 ? "contained" : "outlined"}
-              onPress={() => setHoleCountSelection(18)}
-              style={styles.holeSelectButton}
-            >
-              18 Holes
-            </Button>
-          </View>
-          
         </Card.Content>
-        <Card.Actions style={{justifyContent: "center", gap: 8}}>
-          {started && (
-            <Button
-              mode="outlined"
-              style={[styles.button, {flex: 1}]}
-              onPress={saveDraft}
-              loading={isSaving}
-              icon={({color}) => <MaterialCommunityIcons name="content-save-outline" size={18} color={color} />}
-            >
-              Save Draft
-            </Button>
-          )}
-          
+
+        <Card.Actions style={styles.setupActions}>
           <Button
             mode="contained"
-            style={[styles.button, {flex: 2, backgroundColor: "#0000FF"}]}
+            style={styles.startButton}
             onPress={handleStart}
             disabled={!selectedCourse || !selectedGender || !selectedTee || loading}
+            icon="play-circle"
+            contentStyle={styles.startButtonContent}
           >
             Start Round
           </Button>
-        </Card.Actions>
-        <Card.Actions style={{justifyContent: "center", marginTop: 0}}>
+          
           <Button 
             mode="outlined" 
-            onPress={() => {router.push('/ViewRounds')}}
-            style={[styles.button, { borderColor: "#00BFFF" }]}
+            onPress={() => router.push('/ViewRounds')}
+            style={styles.viewRoundsButton}
             textColor="#00BFFF"
-            icon={({color}) => <MaterialCommunityIcons name="view-list" size={18} color={color} />}
+            icon="history"
           >
-            View Rounds
+            View Past Rounds
           </Button>
         </Card.Actions>
       </Card>
-      
+
       <Portal>
-        <Dialog visible={draftsDialogVisible} onDismiss={() => setDraftsDialogVisible(false)} style={{backgroundColor: 'rgba(0,0,38,0.95)'}}>
-          <Dialog.Title style={{color: '#fff'}}>Saved Drafts</Dialog.Title>
-          <Dialog.Content>
-            {drafts.length === 0 ? (
-              <Text style={{color: '#fff', opacity: 0.7}}>No saved drafts found.</Text>
+        <Dialog visible={courseDialogVisible} onDismiss={() => setCourseDialogVisible(false)} style={styles.teeDialog}>
+          <Dialog.Title style={styles.teeDialogTitle}>Select Course</Dialog.Title>
+          <Dialog.Content style={styles.teeDialogContent}>
+            <TextInput
+              label="Search Course"
+              mode="outlined"
+              value={courseQuery}
+              onChangeText={setCourseQuery}
+              style={styles.dialogInput}
+              outlineColor="rgba(255,255,255,0.3)"
+              activeOutlineColor="#00BFFF"
+              textColor="#FFFFFF"
+              placeholderTextColor="rgba(255,255,255,0.5)"
+              theme={{ colors: { onSurfaceVariant: 'rgba(255,255,255,0.7)' } }}
+              placeholder="Search By Club Name"
+              right={isSearching ? <TextInput.Icon icon="magnify" color="#00BFFF" /> : undefined}
+            />
+            
+            <ScrollView 
+              style={[
+                styles.courseScroll,
+                filteredCourses.length > 0 && {
+                  maxHeight: Math.min(
+                    350,
+                    Math.max(
+                      80,
+                      filteredCourses.length * 58
+                    )
+                  )
+                }
+              ]}
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.teeScrollContent}
+            >
+              {filteredCourses.length > 0 ? (
+                filteredCourses.map((c: Course) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.courseOption,
+                      selectedCourse?.id === c.id && styles.courseOptionSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedCourse(c);
+                      setCourseDialogVisible(false);
+                    }}
+                  >
+                    <Text style={[
+                     
+                      styles.courseOptionText,
+                      selectedCourse?.id === c.id && styles.courseOptionTextSelected
+                    ]}>
+                      {c.course_name}
+                    </Text>
+                    <Text style={styles.courseLocationText}>
+                      {typeof c.location === 'string' 
+                        ? c.location 
+                        : [c.location?.city, c.location?.state, c.location?.country].filter(Boolean).join(', ')}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                courseQuery.length >= 3 && !isSearching && (
+                  <Text style={styles.noCoursesText}>No courses found.</Text>
+                )
+              )}
+            </ScrollView>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setCourseDialogVisible(false)}>Cancel</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      <Portal>
+        <Dialog 
+          visible={teeDialogVisible} 
+          onDismiss={() => setTeeDialogVisible(false)}
+          style={styles.teeDialog}
+        >
+          <Dialog.Title style={styles.teeDialogTitle}>Select Tee</Dialog.Title>
+          <Dialog.Content style={styles.teeDialogContent}>
+            {((selectedGender === "male" || selectedGender === "female") && 
+              selectedCourse?.tees?.[selectedGender]) ? (
+              <ScrollView 
+                style={[
+                  styles.teeScroll,
+                  {
+                    maxHeight: Math.min(
+                      350,  
+                      Math.max(
+                        80,
+                        selectedCourse.tees[selectedGender].length * 58 
+                      )
+                    )
+                  }
+                ]}
+                showsVerticalScrollIndicator={false}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.teeScrollContent}
+              >
+                {selectedCourse.tees[selectedGender].map((tee: TeeInfo) => (
+                  <TouchableOpacity
+                    key={tee.id}
+                    style={[
+                      styles.teeOption,
+                      selectedTee === tee.tee_name && styles.teeOptionSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedTee(tee.tee_name);
+                      setTeeDialogVisible(false);
+                    }}
+                  >
+                    <Text style={[
+                      styles.teeOptionText,
+                      selectedTee === tee.tee_name && styles.teeOptionTextSelected
+                    ]}>
+                      {tee.tee_name}
+                      {tee.course_rating ? ` (CR ${tee.course_rating})` : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
-              drafts.map((draft) => (
-                <Card key={draft.draft_id} style={styles.draftCard}>
-                  <Card.Title 
-                    title={draft.selected_course?.course_name || draft.selected_course?.club_name || "Unknown Course"} 
-                    subtitle={`Last saved: ${formatDate(draft.timestamp)}`}
-                    titleStyle={{color: '#fff'}}
-                    subtitleStyle={{color: '#ccc'}}
-                  />
-                  <Card.Actions style={{justifyContent: 'flex-end'}}>
-                    <Button onPress={() => deleteDraft(draft.draft_id)} textColor="#f44">Delete</Button>
-                    <Button onPress={() => loadDraft(draft)}>Load</Button>
-                  </Card.Actions>
-                </Card>
-              ))
+              <Text style={styles.noTeesText}>
+                {!selectedGender 
+                  ? "Please select a gender first" 
+                  : !selectedCourse 
+                    ? "Please select a course first" 
+                    : "No tees available for this selection"}
+              </Text>
+            )}
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setTeeDialogVisible(false)}>Cancel</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      <Portal>
+        <Dialog visible={draftsDialogVisible} onDismiss={() => setDraftsDialogVisible(false)} style={styles.teeDialog}>
+          <Dialog.Title style={styles.teeDialogTitle}>Saved Drafts</Dialog.Title>
+          <Dialog.Content style={styles.teeDialogContent}>
+            {drafts.length === 0 ? (
+              <Text style={styles.noTeesText}>No saved drafts found.</Text>
+            ) : (
+              <ScrollView 
+                style={{maxHeight: 350}}
+                showsVerticalScrollIndicator={false}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.teeScrollContent}
+              >
+                {drafts.map((draft) => (
+                  <Card key={draft.draft_id} style={styles.draftCard}>
+                    <Card.Title 
+                      title={draft.selected_course?.course_name || draft.selected_course?.club_name || "Unknown Course"} 
+                      subtitle={`Last saved: ${formatDate(draft.timestamp)}`}
+                      titleStyle={{color: '#fff', fontSize: 14}}
+                      subtitleStyle={{color: '#ccc', fontSize: 12}}
+                    />
+                    <Card.Actions style={{justifyContent: 'flex-end', paddingTop: 0}}>
+                      <Button onPress={() => deleteDraft(draft.draft_id)} textColor="#f44">Delete</Button>
+                      <Button onPress={() => loadDraft(draft)}>Load</Button>
+                    </Card.Actions>
+                  </Card>
+                ))}
+              </ScrollView>
             )}
           </Dialog.Content>
           <Dialog.Actions>
@@ -1375,410 +2120,832 @@ export default function RoundInput() {
       )}
     </ScrollView>
   );
+
+  // Helper function for weather icons
+  function getWeatherIcon(condition: string) {
+    const conditionLower = condition.toLowerCase();
+    
+    if (conditionLower.includes('sunny') || conditionLower.includes('clear')) {
+      return 'weather-sunny' as const;
+    } else if (conditionLower.includes('partly cloudy') || conditionLower.includes('partly')) {
+      return 'weather-partly-cloudy' as const;
+    } else if (conditionLower.includes('cloudy') || conditionLower.includes('overcast')) {
+      return 'weather-cloudy' as const;
+    } else if (conditionLower.includes('rain') || conditionLower.includes('drizzle')) {
+      return 'weather-rainy' as const;
+    } else if (conditionLower.includes('snow')) {
+      return 'weather-snowy' as const;
+    } else if (conditionLower.includes('storm') || conditionLower.includes('thunder')) {
+      return 'weather-lightning' as const;
+    } else if (conditionLower.includes('fog') || conditionLower.includes('mist')) {
+      return 'weather-fog' as const;
+    } else if (conditionLower.includes('wind')) {
+      return 'weather-windy' as const;
+    } else {
+      return 'weather-partly-cloudy' as const;
+    }
+  }
+
+  // Helper function for score display styling
+  function getScoreDisplayStyle(strokes: number, par: number) {
+    const diff = strokes - par;
+    
+    if (strokes === 0) {
+      return styles.scoreDisplayNeutral;
+    } else if (diff <= -2) {
+      return styles.scoreDisplayEagle;
+    } else if (diff === -1) {
+      return styles.scoreDisplayBirdie;
+    } else if (diff === 0) {
+      return styles.scoreDisplayPar;
+    } else if (diff === 1) {
+      return styles.scoreDisplayBogey;
+    } else {
+      return styles.scoreDisplayDouble;
+    }
+  }
+
+
+  // Helper function to get weather impact advice
+  function getWeatherImpact(weather: any) {
+    if (!weather) return null;
+
+    const temp = weather.current.temp_f;
+    const windSpeed = weather.current.wind_mph;
+    const humidity = weather.current.humidity;
+    const condition = weather.current.condition.text.toLowerCase();
+    const windDir = weather.current.wind_dir;
+
+
+
+    let impacts = [];
+
+    // Temperature impacts
+    if (temp < 45) {
+      const distanceLoss = Math.round(temp < 32 ? 8 : 5); // More loss in freezing temps
+      impacts.push({
+        type: "temperature",
+        icon: "thermometer-minus",
+        color: "#87CEEB",
+        title: "Cold Weather",
+        effect: `Ball travels ${distanceLoss}-${distanceLoss + 3} yards less. Air is denser. Consider using one more club.`
+      });
+    } else if (temp > 85) {
+      const distanceGain = Math.round(temp > 95 ? 8 : 5); // More gain in extreme heat
+      impacts.push({
+        type: "temperature",
+        icon: "thermometer-plus",
+        color: "#FF6B6B",
+        title: "Hot Weather",
+        effect: `Ball travels ${distanceGain}-${distanceGain + 3} yards farther. Thinner air. Consider using one less club.`
+      });
+    }
+
+    // Enhanced wind impacts with real-time phone direction
+    if (windSpeed > 5) {
+      const calculateWindEffect = (windMph: number) => {
+        const headwindYards = Math.round(windMph * 2);
+        const tailwindYards = Math.round(windMph * 1.5);
+        const crosswindYards = Math.round(windMph * 0.8);
+        
+        return { headwindYards, tailwindYards, crosswindYards };
+      };
+
+      const { headwindYards, tailwindYards, crosswindYards } = calculateWindEffect(windSpeed);
+      
+      // Real-time wind analysis if phone heading is available
+      let liveWindAnalysis = "";
+      if (phoneHeading !== null) {
+        const windDegrees = windDirectionToDegrees(windDir);
+        const relative = getWindRelativeDirection(phoneHeading, windDegrees);
+        
+        const phoneDirection = Math.round(phoneHeading);
+        
+        if (relative.type === 'headwind') {
+          liveWindAnalysis = `\n📱 CURRENT: ${headwindYards} yards AGAINST you (${phoneDirection}°)`;
+        } else if (relative.type === 'tailwind') {
+          liveWindAnalysis = `\n📱 CURRENT: +${tailwindYards} yards WITH you (${phoneDirection}°)`;
+        } else {
+          liveWindAnalysis = `\n📱 CURRENT: ±${crosswindYards} yards crosswind (${phoneDirection}°)`;
+        }
+      }
+
+      if (windSpeed > 15) {
+        impacts.push({
+          type: "wind",
+          icon: "weather-windy",
+          color: "#4ECDC4",
+          title: `Strong Wind (${windSpeed} mph ${windDir})`,
+          effect: `⬇️ Into wind: -${headwindYards} yards\n⬆️ With wind: +${tailwindYards} yards\n↔️ Crosswind: ±${crosswindYards} yards lateral${liveWindAnalysis}\n\nAdjust club selection and aim significantly for wind direction.`
+        });
+      } else if (windSpeed > 8) {
+        impacts.push({
+          type: "wind",
+          icon: "weather-windy",
+          color: "#45B7D1",
+          title: `Moderate Wind (${windSpeed} mph ${windDir})`,
+          effect: `⬇️ Into wind: -${headwindYards} yards\n⬆️ With wind: +${tailwindYards} yards\n↔️ Crosswind: ±${crosswindYards} yards lateral${liveWindAnalysis}\n\nAccount for wind direction on approach shots.`
+        });
+      } else {
+        impacts.push({
+          type: "wind",
+          icon: "weather-windy",
+          color: "#87CEEB",
+          title: `Light Wind (${windSpeed} mph ${windDir})`,
+          effect: `⬇️ Into wind: -${headwindYards} yards\n⬆️ With wind: +${tailwindYards} yards\n↔️ Crosswind: ±${crosswindYards} yards lateral${liveWindAnalysis}\n\nMinor adjustments needed for longer shots.`
+        });
+      }
+    }
+
+    // Humidity impacts with distance effects
+    if (humidity > 80) {
+      const humidityEffect = humidity > 90 ? 3 : 2;
+      impacts.push({
+        type: "humidity",
+        icon: "water-percent",
+        color: "#96CEB4",
+        title: "High Humidity",
+        effect: `Ball may travel ${humidityEffect}-${humidityEffect + 2} yards less due to dense air. Grip may become slippery - use towel frequently.`
+      });
+    }
+
+    // Precipitation impacts
+    if (condition.includes('rain') || condition.includes('drizzle')) {
+      impacts.push({
+        type: "precipitation",
+        icon: "weather-rainy",
+        color: "#74B9FF",
+        title: "Wet Conditions",
+        effect: "Reduced ball roll: -10-15 yards total distance. Softer landing on greens. Course plays 1-2 clubs longer. Keep grips dry."
+      });
+    }
+
+    // Enhanced course condition based on weather
+    if (condition.includes('sunny') && temp > 75 && humidity < 60) {
+      impacts.push({
+        type: "course",
+        icon: "weather-sunny",
+        color: "#FDCB6E",
+        title: "Dry Conditions",
+        effect: "Firm fairways: +10-20 yards roll. Hard greens: ball may bounce and roll more. Course plays shorter than yardage."
+      });
+    }
+
+    // For testing - add a sample impact if no real impacts are found
+    if (impacts.length === 0) {
+      impacts.push({
+        type: "test",
+        icon: "information",
+        color: "#00BFFF",
+        title: "Ideal Conditions",
+        effect: `${temp}°F, ${windSpeed}mph wind from ${windDir}, ${humidity}% humidity. ${condition}. Play normal yardages.`
+      });
+    }
+
+    return impacts;
+  }
+
+
+  // ...existing functions remain the same...
 }
 
 const styles = StyleSheet.create({
-  outerContainer: {
+  // Setup Screen Styles
+  setupContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
     backgroundColor: 'transparent',
   },
-  card: {
-    width: '100%',
-    maxWidth: 450,
-    backgroundColor: 'rgba(0,0,38,0.95)',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 0,
-    marginTop: 8,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
+  setupContent: {
+    padding: 20,
+    paddingTop: 40,
+    paddingBottom: 80,
   },
-  cardTitle: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 18,
-    textAlign: "center",
+  welcomeSection: {
+    alignItems: 'center',
+    marginBottom: 24,
   },
-  cardSubtitle: {
-    color: "#aaa",
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 2,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 16,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+  welcomeTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginTop: 12,
     textAlign: 'center',
   },
-  compactCard: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: 'rgba(0,0,38,0.96)',
-    borderRadius: 16,
-    marginVertical: 16,
+  welcomeSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  setupCard: {
+    backgroundColor: 'rgba(0,0,38,0.95)',
+    borderRadius: 20,
+    elevation: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginBottom: 20,
+  },
+  setupCardContent: {
+    padding: 20,
+  },
+  selectionSection: {
+    marginBottom: 20,
+  },
+  selectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    justifyContent: 'space-between',
+  },
+  selectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 8,
+    flex: 1,
+  },
+  draftsButton: {
+    marginRight: -8,
+  },
+  selectionCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    minHeight: 60,
+  },
+  selectionCardSelected: {
+    backgroundColor: 'rgba(0,191,255,0.15)',
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  selectedCourseContent: {
+    flex: 1,
+  },
+  selectedCourseTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  selectedCourseSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
+  },
+  placeholderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  placeholderText: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.5)',
+    marginLeft: 8,
+  },
+  selectedText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+    flex: 1,
+  },
+  weatherCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    minHeight: 80,
+  },
+  weatherLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  weatherLoadingText: {
+    color: 'rgba(255,255,255,0.7)',
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  weatherError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  weatherErrorText: {
+    color: 'rgba(255,255,255,0.5)',
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  weatherContent: {
+    flex: 1,
+  },
+  weatherMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  weatherTemp: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  weatherTempValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  weatherCondition: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  weatherDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  weatherDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  weatherDetailText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+
+  // Playing Screen Styles
+  playingContainer: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  playingContent: {
+    padding: 16,
+    paddingTop: 20,
+    paddingBottom: 100,
+  },
+  runningStatsHeader: {
+    width: '100%',
+    backgroundColor: 'rgba(0,0,38,0.9)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  compactContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+  runningStatsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  scoreHeader: {
-    alignItems: 'center',
-    marginBottom: 16,
+  statPill: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
     paddingVertical: 8,
-  },
-  scoreDisplayCard: {
-    backgroundColor: 'rgba(0, 191, 255, 0.12)',
-    borderRadius: 12,
-    padding: 12,
     alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 191, 255, 0.2)',
-    minWidth: 120,
+    flex: 1,
+    marginHorizontal: 2,
   },
-  scoreDisplayLabel: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 11,
-    marginBottom: 4,
-    letterSpacing: 0.3,
+  statPillValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#00BFFF',
+  },
+  statPillLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
     textTransform: 'uppercase',
   },
-  scoreDisplayValue: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "bold",
-    textShadowColor: 'rgba(0, 191, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  scoreToPar: {
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 2,
-    opacity: 0.9,
-    letterSpacing: 0.3,
-  },
-  progressSection: {
-    alignItems: 'center',
+  holeCard: {
     width: '100%',
+    backgroundColor: 'rgba(0,0,38,0.95)',
+    borderRadius: 20,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  progressText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 13,
-    marginBottom: 8,
+  holeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  exitButton: {
+    padding: 4,
+  },
+  holeInfo: {
+    alignItems: 'center',
+    flex: 1,
+   },
+  holeNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: 2,
+  },
+  holeDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 16,
+  },
+  holeDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  holeDetailText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
     fontWeight: '500',
   },
-  progressBar: {
-    width: '80%',
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 2,
-    overflow: 'hidden',
+  progressIndicator: {
+    alignItems: 'flex-end',
   },
-  progressFill: {
+  progressText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    marginBottom: 4,
+  },
+  progressBarContainer: {
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 2,
+  },
+  progressBar: {
     height: '100%',
     backgroundColor: '#00BFFF',
     borderRadius: 2,
   },
-  primaryStatsSection: {
-    marginBottom: 16,
+  holeContent: {
+    padding: 20,
+  },
+  currentScoreSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  scoreDisplay: {
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    minWidth: 120,
+  },
+  scoreDisplayNeutral: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  scoreDisplayEagle: {
+    backgroundColor: 'rgba(255,215,0,0.15)',
+    borderColor: 'rgba(255,215,0,0.4)',
+  },
+  scoreDisplayBirdie: {
+    backgroundColor: 'rgba(76,175,80,0.15)',
+    borderColor: 'rgba(76,175,80,0.4)',
+  },
+  scoreDisplayPar: {
+    backgroundColor: 'rgba(0,191,255,0.15)',
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  scoreDisplayBogey: {
+    backgroundColor: 'rgba(255,152,0,0.15)',
+    borderColor: 'rgba(255,152,0,0.4)',
+  },
+  scoreDisplayDouble: {
+    backgroundColor: 'rgba(244,67,54,0.15)',
+    borderColor: 'rgba(244,67,54,0.4)',
+  },
+  scoreDisplayNumber: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  scoreDisplayLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 4,
+    letterSpacing: 1,
+  },
+  girIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginTop: 12,
+  },
+  girIndicatorActive: {
+    backgroundColor: 'rgba(76,175,80,0.2)',
+  },
+  girText: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  girTextActive: {
+    color: '#4CAF50',
+  },
+  gpsSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,191,255,0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginBottom: 20,
+  },
+  gpsText: {
+    fontSize: 14,
+    color: '#00BFFF',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  inputSection: {
+    marginBottom: 20,
   },
   sectionTitle: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
     marginBottom: 12,
     textAlign: 'center',
-    letterSpacing: 0.3,
   },
-  primaryStatsGrid: {
+  inputGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'space-between',
+    gap: 12,
   },
-  statCard: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 8,
-    padding: 8,
+  inputCard: {
+    width: '48%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  statLabel: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 10,
-    marginBottom: 6,
-    fontWeight: "600",
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
+    marginVertical: 8,
     textTransform: 'uppercase',
-    letterSpacing: 0.3,
   },
-  statInput: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 6,
+  inputField: {
+    backgroundColor: 'transparent',
     width: '100%',
-    height: 36,
+    height: 40,
   },
-  penaltyInput: {
-    backgroundColor: 'rgba(255,107,107,0.08)',
-  },
-  inputContent: {
-    paddingHorizontal: 6,
+  penaltyField: {
+    backgroundColor: 'rgba(244,67,54,0.1)',
   },
   performanceSection: {
-    marginBottom: 16,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 24,
   },
-  switchContainer: {
-    gap: 8,
+  toggleContainer: {
+    gap: 12,
   },
-  switchItem: {
+  toggleCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  performanceLabel: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 13,
-    fontWeight: "500",
+  toggleInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#fff',
+    marginLeft: 12,
+  },
+  toggleSubtext: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
+    marginLeft: 8,
+  },
+  autoIndicator: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  autoIndicatorActive: {
+    backgroundColor: 'rgba(76,175,80,0.2)',
+  },
+  autoText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
   },
   navigationSection: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    gap: 12,
   },
   navButton: {
     flex: 1,
-    borderRadius: 8,
-    minHeight: 36,         
+    borderRadius: 12,
+    height: 48,
     justifyContent: 'center',
-    alignItems: 'center',   
+  },
+  navButtonContent: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   prevButton: {
-    borderColor: 'rgba(0, 191, 255, 0.5)',
+    borderColor: 'rgba(0,191,255,0.5)',
   },
   nextButton: {
     backgroundColor: '#00BFFF',
   },
   finishButton: {
-    backgroundColor: "#4CAF50",
+    backgroundColor: '#4CAF50',
   },
-  exitButton: {
-    padding: 6,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 107, 107, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
-  },
-  input: {
-    marginBottom: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 8,
-    width: '100%',
-  },
-  label: {
-    color: "#fff",
-    marginBottom: 6,
-    fontSize: 14,
-    textAlign: 'left',
-    marginTop: 8,
-    fontWeight: '500',
-  },
-  courseButton: {
-    marginVertical: 3,
-    borderRadius: 8,
-    width: '100%',
-    justifyContent: 'flex-start',
-  },
-  radioRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-    gap: 16,
-  },
-  radioLabel: {
-    color: "#fff",
-    fontSize: 14,
-    marginRight: 16,
-    fontWeight: '500',
-  },
-  teeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 12,
-  },
-  teeButton: {
-    marginHorizontal: 2,
-    borderRadius: 8,
-    marginBottom: 6,
-  },
-  button: {
-    marginTop: 8,
-    borderRadius: 10,
-    paddingVertical: 6,
-    width: '100%',
-  },
-  summaryText: {
-    color: "#fff",
-    fontSize: 14,
-    marginBottom: 6,
-    flexShrink: 1,
-    lineHeight: 20,
-  },
-  headerRow: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  holeSelectRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginVertical: 8,
-    gap: 8,
-  },
-  holeSelectButton: {
+
+  // Summary Screen Styles
+  summaryContainer: {
     flex: 1,
-    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
-  draftCard: {
-    marginVertical: 6,
-    backgroundColor: 'rgba(30,30,60,0.85)',
-    borderRadius: 10,
+  summaryScrollContent: {
+    padding: 16,
+    paddingTop: 40,
+    paddingBottom: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100%',
   },
-  snackbar: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: "rgba(0,0,0,0.9)",
-    borderRadius: 10,
-    padding: 12,
-    alignItems: "center",
-    zIndex: 100,
+  summaryCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: 'rgba(0,0,38,0.95)',
+    borderRadius: 20,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  compactHeader: {
-    flexDirection: 'row',
+  summaryHeader: {
     alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    paddingVertical: 8,
-  },
-  exitButtonAbsolute: {
-    position: 'absolute',
-    left: 8,
-    top: 4,
-  },
-  headerTextContainer: {
-    alignItems: 'center',
+    padding: 24,
+    paddingBottom: 16,
   },
   summaryTitle: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "bold",
-    textAlign: "center",
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginTop: 12,
   },
   summarySubtitle: {
-    color: "#ccc",
     fontSize: 14,
-    textAlign: "center",
+    color: 'rgba(255,255,255,0.7)',
     marginTop: 4,
   },
   summaryDivider: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    marginHorizontal: 16,
-    marginBottom: 8,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginHorizontal: 24,
   },
   summaryContent: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    padding: 24,
   },
-  summaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  summaryGrid: {
+    marginBottom: 20,
+  },
+  summaryMainStats: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  scoreBadge: {
+    backgroundColor: 'rgba(0,191,255,0.2)',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  scoreBadgeLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  scoreBadgeValue: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#00BFFF',
     marginVertical: 4,
   },
-  summaryLabel: {
-    color: "rgba(255,255,255,0.8)",
+  scoreBadgeSubtext: {
     fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '500',
   },
-  summaryValue: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  picker: {
-    width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 8,
-    height: 56,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    color: '#fff',
-    justifyContent: 'center',
-  },
-  customPicker: {
+  summaryStatsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 16,
+  },
+  statBox: {
+    width: '48%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 8,
-    height: 56,
-    marginBottom: 12,
-    paddingHorizontal: 14,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  customPickerText: {
+  statValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
     color: '#fff',
-    fontSize: 16,
+    marginVertical: 4,
   },
+  statLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+  },
+  courseInfoCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  courseInfoTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  courseInfoDetails: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  notesInput: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+  },
+  summaryActions: {
+    padding: 24,
+    paddingTop: 0,
+    flexDirection: 'column',
+    gap: 12,
+  },
+  summaryButton: {
+    borderRadius: 12,
+    height: 48,
+  },
+  saveButton: {
+    backgroundColor: '#4CAF50',
+  },
+
+  // Common Styles
+  outerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: 'transparent',
+  },
+  
+  // Dialog and other shared styles
   teeDialog: {
     backgroundColor: 'rgba(0,0,38,0.95)',
     borderRadius: 12,
@@ -1815,6 +2982,7 @@ const styles = StyleSheet.create({
   teeOptionText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '500',
   },
   teeOptionTextSelected: {
     color: '#00BFFF',
@@ -1864,4 +3032,440 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: 8,
   },
+  snackbar: {
+    position: "absolute",
+    bottom: 20,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    borderRadius: 10,
+    padding: 12,
+    alignItems: "center",
+    zIndex: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  draftCard: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  genderContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  genderCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  genderCardSelected: {
+    backgroundColor: 'rgba(0,191,255,0.15)',
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  genderText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  genderTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  holeCountContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  holeCountCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  holeCountCardSelected: {
+    backgroundColor: 'rgba(0,191,255,0.15)',
+    borderColor: 'rgba(0,191,255,0.4)',
+  },
+  holeCountNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  holeCountNumberSelected: {
+    color: '#00BFFF',
+  },
+  holeCountLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  holeCountLabelSelected: {
+    color: 'rgba(255,255,255,0.9)',
+  },
+  setupActions: {
+    padding: 20,
+    paddingTop: 0,
+    flexDirection: 'column',
+    gap: 12,
+  },
+  startButton: {
+    backgroundColor: '#00BFFF',
+    borderRadius: 12,
+    height: 48,
+  },
+  startButtonContent: {
+    height: 48,
+  },
+  viewRoundsButton: {
+    borderColor: 'rgba(0,191,255,0.5)',
+    borderRadius: 12,
+    height: 48,
+  },
+
+  // Weather Impact Styles
+  weatherImpactCard: {
+    backgroundColor: 'rgba(0,0,38,0.9)',
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  weatherImpactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  weatherImpactHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  weatherImpactTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 8,
+  },
+  weatherImpactBadge: {
+    backgroundColor: '#00BFFF',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  weatherImpactBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  weatherImpactContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  weatherImpactItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#00BFFF',
+  },
+  weatherImpactItemContent: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  weatherImpactItemTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  weatherImpactItemEffect: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    lineHeight: 18,
+  },
+
+  // Compass Instruction Styles
+  compassInstructionCard: {
+    backgroundColor: 'rgba(255, 165, 0, 0.1)',
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 165, 0, 0.3)',
+    overflow: 'hidden',
+  },
+  compassInstructionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 165, 0, 0.2)',
+  },
+  compassInstructionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFA726',
+    marginLeft: 8,
+  },
+  compassInstructionContent: {
+    padding: 16,
+  },
+  compassInstructionText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.9)',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  compassInstructionSteps: {
+    gap: 8,
+  },
+  compassInstructionStep: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.8)',
+    lineHeight: 18,
+  },
+
+  // Compass Widget Styles
+  compassCard: {
+    backgroundColor: 'rgba(0,0,38,0.9)',
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  compassHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  compassTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginLeft: 8,
+  },
+  compassBadge: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  compassBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  compassContent: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  compassCircle: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  compassDirection: {
+    position: 'absolute',
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  compassNorth: {
+    top: 8,
+  },
+  compassEast: {
+    right: 8,
+  },
+  compassSouth: {
+    bottom: 8,
+  },
+  compassWest: {
+    left: 8,
+  },
+  compassPhoneIndicator: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compassPhoneArrow: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 25,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#00BFFF',
+    marginTop: -50,
+  },
+  compassWindIndicator: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compassWindArrow: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderBottomWidth: 20,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#FF6B6B',
+    marginTop: -50,
+  },
+  compassCenter: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+    position: 'absolute',
+  },
+  windEffectContainer: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  windEffectDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  windEffectText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  compassReadings: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+  },
+  compassReading: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  compassReadingLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    marginBottom: 4,
+  },
+  compassReadingValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  debugButton: {
+    padding: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,107,107,0.1)',
+  },
+  debugPanel: {
+    backgroundColor: 'rgba(255,107,107,0.1)',
+    borderRadius: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.3)',
+    maxHeight: 200,
+  },
+  debugHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,107,107,0.2)',
+  },
+  debugTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF6B6B',
+    marginLeft: 8,
+  },
+  debugScroll: {
+    flex: 1,
+    padding: 12,
+  },
+  debugText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.8)',
+    fontFamily: 'monospace',
+    lineHeight: 14,
+  },
+
 });
+function getWindRelativeDirection(phoneHeading: number, windDegrees: number) {
+  // Normalize angles to 0-360 range
+  const normalizeAngle = (angle: number) => ((angle % 360) + 360) % 360;
+  
+  const normalizedPhone = normalizeAngle(phoneHeading);
+  const normalizedWind = normalizeAngle(windDegrees);
+  
+  // Calculate the relative angle between phone direction and wind direction
+  let relativeDiff = normalizedWind - normalizedPhone;
+  
+  // Normalize to -180 to 180 range for easier classification
+  if (relativeDiff > 180) relativeDiff -= 360;
+  if (relativeDiff < -180) relativeDiff += 360;
+  
+  // Classify wind direction relative to phone heading
+  const absRelative = Math.abs(relativeDiff);
+  
+  if (absRelative <= 45) {
+    // Wind is coming from the same direction as phone is pointing (headwind)
+    return { type: 'headwind', angle: relativeDiff };
+  } else if (absRelative >= 135) {
+    // Wind is coming from behind the phone direction (tailwind)
+    return { type: 'tailwind', angle: relativeDiff };
+  } else {
+    // Wind is coming from the side (crosswind)
+    return { type: 'crosswind', angle: relativeDiff };
+  }
+}
+
+function windDirectionToDegrees(windDir: string): number {
+  const directions: { [key: string]: number } = {
+    'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5,
+    'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5,
+    'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5,
+    'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5
+  };
+  
+  return directions[windDir.toUpperCase()] || 0;
+}
+

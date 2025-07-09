@@ -13,7 +13,26 @@
       "infoPlist": {
         "NSCameraUsageDescription": "SwingSync needs access to your camera to take photos for your profile and other app features.",
         "NSPhotoLibraryUsageDescription": "SwingSync needs access to your photo library to let you select and upload images.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "SwingSync needs your location to track your sessions and provide weather data.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SwingSync needs your location to automatically track sessions even when the app is in the background.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {
+            "api.weatherapi.com": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSExceptionMinimumTLSVersion": "1.0",
+              "NSIncludesSubdomains": true,
+              "NSExceptionRequiresForwardSecrecy": false
+            },
+            "weatherapi.com": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSExceptionMinimumTLSVersion": "1.0",
+              "NSIncludesSubdomains": true,
+              "NSExceptionRequiresForwardSecrecy": false
+            }
+          }
+        }
       },
       "bundleIdentifier": "com.eidorb.swingsync"
     },
@@ -41,14 +60,23 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location."
+        }
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "BACKEND_URL": "https://api.swing-sync.com",
-      "ver" : "1.0.1",
+      "WEATHER_API_KEY": "e3e0fcbfde894d75a0d152521250707",
+      "WEATHER_URL": "http://api.weatherapi.com/v1",
+      "ver": "1.0.2",
       "router": {},
       "eas": {
         "projectId": "ee3838ec-f372-487a-b19b-c716a644ae77"

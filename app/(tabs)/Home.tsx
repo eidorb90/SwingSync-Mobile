@@ -1,4 +1,4 @@
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { LinearGradient } from "expo-linear-gradient";
@@ -172,66 +172,93 @@ export default function HomeScreen() {
           onDismiss={handleCloseWhatsNew} 
           contentContainerStyle={styles.whatsNewModalContainer}
         >
-          <Animated.View style={{ opacity: fadeAnim, width: '100%' }}>
+          <Animated.View style={{ opacity: fadeAnim, width: '100%', height: '100%' }}>
             <LinearGradient
               colors={['#000033', '#000080', '#000033']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.whatsNewGradient}
             >
-              <View style={styles.whatsNewHeader}>
-                <View style={styles.whatsNewIconContainer}>
-                  <Ionicons name="people" size={24} color="#FFD700" />
-                </View>
-                <Text style={styles.whatsNewTitle}>What's New</Text>
-              </View>
-              
-              <View style={styles.whatsNewContent}>
-                <Text style={styles.whatsNewHeadline}>
-                  Introducing the Community Hub
-                </Text>
-                
-                <Text style={styles.whatsNewDescription}>
-                  We're excited to bring you a brand new way to connect with fellow golfers and share your journey.
-                </Text>
-                
-                <View style={styles.featureList}>
-                  <View style={styles.featureItem}>
-                    <MaterialCommunityIcons name="account-group" size={20} color="#4CAF50" style={styles.featureIcon} />
-                    <Text style={styles.featureText}>Connect with other golfers</Text>
-                  </View>
-                  
-                  <View style={styles.featureItem}>
-                    <MaterialCommunityIcons name="share-variant" size={20} color="#2196F3" style={styles.featureIcon} />
-                    <Text style={styles.featureText}>Share rounds, tips, and stories</Text>
-                  </View>
-                  
-                  <View style={styles.featureItem}>
-                    <MaterialCommunityIcons name="thumb-up" size={20} color="#FF9800" style={styles.featureIcon} />
-                    <Text style={styles.featureText}>Like and comment on posts</Text>
-                  </View>
-                  
-                  <View style={styles.featureItem}>
-                    <MaterialCommunityIcons name="golf" size={20} color="#9C27B0" style={styles.featureIcon} />
-                    <Text style={styles.featureText}>See what others are up to in SwingSync</Text>
-                  </View>
-                </View>
-                
-                <View style={styles.whatsNewFooter}>
-                  <Text style={styles.whatsNewFooterText}>
-                    Head to the <Text style={styles.highlightText}>Community</Text> tab to get started!
-                  </Text>
-                </View>
-              </View>
-              
-              <Button 
-                mode="contained" 
-                onPress={handleCloseWhatsNew}
-                style={styles.whatsNewButton}
-                labelStyle={styles.whatsNewButtonLabel}
+              <ScrollView 
+                style={styles.whatsNewScrollView}
+                showsVerticalScrollIndicator={true}
+                contentContainerStyle={styles.whatsNewScrollContent}
+                bounces={true}
               >
-                Let's Go!
-              </Button>
+                <View style={styles.whatsNewHeader}>
+                  <View style={styles.whatsNewIconContainer}>
+                    <MaterialCommunityIcons name="rocket-launch" size={24} color="#FFD700" />
+                  </View>
+                  <Text style={styles.whatsNewTitle}>What's New in v1.0.2</Text>
+                </View>
+                
+                <View style={styles.whatsNewContent}>
+                  <Text style={styles.whatsNewHeadline}>
+                    Major Updates & New Features
+                  </Text>
+                  
+                  <Text style={styles.whatsNewDescription}>
+                    We've been working hard to bring you the best golf tracking experience. Check out these exciting new features!
+                  </Text>
+                  
+                  <View style={styles.featureList}>
+                    <View style={styles.featureItem}>
+                      <MaterialCommunityIcons name="account-circle" size={20} color="#4CAF50" style={styles.featureIcon} />
+                      <View style={styles.featureTextContainer}>
+                        <Text style={styles.featureTitle}>Enhanced Profile Pages</Text>
+                        <Text style={styles.featureDescription}>View detailed stats, follow friends, and see activity feeds</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.featureItem}>
+                      <MaterialCommunityIcons name="golf" size={20} color="#2196F3" style={styles.featureIcon} />
+                      <View style={styles.featureTextContainer}>
+                        <Text style={styles.featureTitle}>Smart Round Input</Text>
+                        <Text style={styles.featureDescription}>GPS tracking, weather data, and auto-calculated GIR</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.featureItem}>
+                      <MaterialCommunityIcons name="account-group" size={20} color="#FF9800" style={styles.featureIcon} />
+                      <View style={styles.featureTextContainer}>
+                        <Text style={styles.featureTitle}>Community Hub</Text>
+                        <Text style={styles.featureDescription}>Share posts, photos, videos and connect with golfers</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.featureItem}>
+                      <MaterialCommunityIcons name="brain" size={20} color="#9C27B0" style={styles.featureIcon} />
+                      <View style={styles.featureTextContainer}>
+                        <Text style={styles.featureTitle}>AI Golf Coach "Woody"</Text>
+                        <Text style={styles.featureDescription}>Get personalized tips and swing analysis</Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.featureItem}>
+                      <MaterialCommunityIcons name="weather-windy" size={20} color="#00BCD4" style={styles.featureIcon} />
+                      <View style={styles.featureTextContainer}>
+                        <Text style={styles.featureTitle}>Live Weather & Wind</Text>
+                        <Text style={styles.featureDescription}>Real-time conditions and shot distance adjustments</Text>
+                      </View>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.whatsNewFooter}>
+                    <Text style={styles.whatsNewFooterText}>
+                      Explore the <Text style={styles.highlightText}>Community</Text> tab and updated <Text style={styles.highlightText}>Profile</Text> to see everything new!
+                    </Text>
+                  </View>
+                  
+                  <Button 
+                    mode="contained" 
+                    onPress={handleCloseWhatsNew}
+                    style={styles.whatsNewButton}
+                    labelStyle={styles.whatsNewButtonLabel}
+                  >
+                    Let's Go!
+                  </Button>
+                </View>
+              </ScrollView>
             </LinearGradient>
           </Animated.View>
         </Modal>
@@ -492,51 +519,44 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.5,
     shadowRadius: 20,
-    elevation: 15,
     borderWidth: 1,
     borderColor: 'rgba(0, 191, 255, 0.5)',
+    height: '85%',
   },
   whatsNewGradient: {
     borderRadius: 18,
-    padding: 0,
     width: '100%',
-    alignItems: 'center',
-    overflow: 'hidden',
+    height: '100%',
   },
   whatsNewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingVertical: 16,
+    paddingVertical: 20,
     paddingHorizontal: 20,
     backgroundColor: 'rgba(0,0,70,0.7)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
   },
   whatsNewIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,40,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,215,0,0.5)',
   },
   whatsNewTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#fff',
-    textShadowColor: 'rgba(0, 0, 0, 0.4)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
-    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
+  whatsNewScrollView: {
+    height: '100%',
+  },
+  whatsNewScrollContent: {
+    paddingBottom: 40,
   },
   whatsNewContent: {
     padding: 24,
-    width: '100%',
+    paddingTop: 0,
   },
   whatsNewHeadline: {
     fontSize: 20,
@@ -559,14 +579,31 @@ const styles = StyleSheet.create({
   },
   featureItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 14,
+    alignItems: 'flex-start',
+    marginBottom: 16,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    padding: 12,
-    borderRadius: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   featureIcon: {
-    marginRight: 12,
+    marginRight: 14,
+    marginTop: 2,
+  },
+  featureTextContainer: {
+    flex: 1,
+  },
+  featureTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  featureDescription: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    lineHeight: 18,
   },
   featureText: {
     color: '#fff',

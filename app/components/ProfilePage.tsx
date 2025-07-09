@@ -7,23 +7,23 @@ import { StatusBar } from 'expo-status-bar';
 import { jwtDecode } from 'jwt-decode';
 import { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    Image,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    View
+  Alert,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import {
-    ActivityIndicator,
-    Avatar,
-    Button,
-    Card,
-    Chip,
-    Divider,
-    List,
-    Text
+  ActivityIndicator,
+  Avatar,
+  Button,
+  Card,
+  Chip,
+  Divider,
+  List,
+  Text
 } from 'react-native-paper';
 import SettingsScreen from './Settings';
 
@@ -120,6 +120,10 @@ export default function ProfilePage(props: ProfilePageProps) {
   const [followingCount, setFollowingCount] = useState<number>(0);
   const [isExternalNavigation, setIsExternalNavigation] = useState<boolean>(false);
 
+  // Add new state variables after existing ones
+  const [userChips, setUserChips] = useState<ChipData[]>([]);
+  const [userChipReplies, setUserChipReplies] = useState<ReplyData[]>([]);
+
 
   const router = useRouter();
 
@@ -130,7 +134,9 @@ export default function ProfilePage(props: ProfilePageProps) {
       fetchUserProfilePicture(),
       fetchUserAchievements(),
       fetchUserReplies(),
-      fetchFollowStats()
+      fetchFollowStats(),
+      fetchUserChips(),
+      fetchUserChipReplies()
     ]).finally(() => {
       setRefreshing(false);
     });
@@ -177,12 +183,21 @@ export default function ProfilePage(props: ProfilePageProps) {
       const data = await response.json();
       setUserData(data);
       setUsername(data.username || "UserName");
-      setHandicapIndex(data.handicap_index || null);
+      setHandicapIndex(data.handicap || null);
       setRoundsPlayed(data.rounds_played || 0);
-      setAverageScore(data.average_score || null);
+      setAverageScore(data.avg_score_per_round || null);
+      
+      // Also check if the current user is following this profile
+      // This should be done in fetchFollowStats, but we can also get it here since
+      // the API returns the followers list
+      if (data.followers_list && userID) {
+        // Convert userID to number for comparison since backend returns numeric IDs
+        const currentUserID = parseInt(userID);
+        setIsFollowing(data.followers_list.includes(currentUserID));
+      }
       
       // If there's a separate endpoint for profile data
-      response = await fetch(`${BACKEND_URL}/api/user/${profileUserId}/profile/`, {
+      response = await fetch(`${BACKEND_URL}/api/user/${profileUserId}/settings/`, {
         headers: {
           Authorization: `Bearer ${token}`,
         }
@@ -202,7 +217,8 @@ export default function ProfilePage(props: ProfilePageProps) {
       setLoading(false);
     }
   };
-  
+
+
   // Fetch profile picture
   const fetchUserProfilePicture = async () => {
     if (!token) return;
@@ -286,7 +302,7 @@ export default function ProfilePage(props: ProfilePageProps) {
     
     try {
       const profileUserId = target_user_id || userID;
-      const response = await fetch(`${BACKEND_URL}/api/user/${profileUserId}/follow-stats/`, {
+      const response = await fetch(`${BACKEND_URL}/api/player/${profileUserId}/stats/`, {
         headers: {
           Authorization: `Bearer ${token}`,
         }
@@ -296,35 +312,105 @@ export default function ProfilePage(props: ProfilePageProps) {
         const data = await response.json();
         setFollowerCount(data.followers || 0);
         setFollowingCount(data.following || 0);
-        setIsFollowing(data.is_following || false);
+        
+        // Check if current user is in the followers list
+        if (data.followers_list && userID) {
+          // Convert userID to number for comparison since backend returns numeric IDs
+          const currentUserID = parseInt(userID);
+          setIsFollowing(data.followers_list.includes(currentUserID));
+        } else {
+          setIsFollowing(false);
+        }
       }
     } catch (error) {
       console.error("Error fetching follow stats:", error);
     }
   };
 
-  // Toggle follow status
+  // Toggle follow status - updated to match backend endpoint
   const toggleFollow = async () => {
     if (!token || !target_user_id) return;
     
+    // Check if user is trying to follow themselves
+    if (target_user_id === userID) {
+      Alert.alert('Error', 'You cannot follow yourself.');
+      return;
+    }
+    
     try {
-      const method = isFollowing ? 'DELETE' : 'POST';
-      const response = await fetch(`${BACKEND_URL}/api/user/${target_user_id}/follow/`, {
-        method,
+      // Updated to match the backend endpoint structure
+      const response = await fetch(`${BACKEND_URL}/api/user/follow/${target_user_id}/`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Update UI based on the response
+        setIsFollowing(!isFollowing);
+        
+        // Update follower count accordingly
+        if (data.detail.includes('unfollowed')) {
+          setFollowerCount(prev => Math.max(0, prev - 1));
+        } else if (data.detail.includes('following')) {
+          setFollowerCount(prev => prev + 1);
+        }
+        
+        // Show success message from server
+        Alert.alert('Success', data.detail);
+      } else {
+        const errorData = await response.json();
+        Alert.alert('Error', errorData.detail || 'Failed to update follow status');
+      }
+    } catch (error) {
+      console.error("Error updating follow status:", error);
+      Alert.alert('Error', 'Failed to update follow status. Please try again.');
+    }
+  };
+
+  // Fetch user's chips
+  const fetchUserChips = async () => {
+    if (!token) return;
+    
+    try {
+      const profileUserId = target_user_id || userID;
+      const response = await fetch(`${BACKEND_URL}/api/chip/user/${profileUserId}/`, {
         headers: {
           Authorization: `Bearer ${token}`,
         }
       });
       
       if (response.ok) {
-        setIsFollowing(!isFollowing);
-        setFollowerCount(prev => isFollowing ? prev - 1 : prev + 1);
-      } else {
-        Alert.alert('Error', 'Failed to update follow status');
+        const data = await response.json();
+        setUserChips(data || []);
       }
     } catch (error) {
-      console.error("Error updating follow status:", error);
-      Alert.alert('Error', 'Failed to update follow status');
+      console.error("Error fetching user chips:", error);
+    }
+  };
+
+  // Fetch user's chip replies
+  const fetchUserChipReplies = async () => {
+    if (!token) return;
+    
+    try {
+      const profileUserId = target_user_id || userID;
+      const response = await fetch(`${BACKEND_URL}/api/reply/user/${profileUserId}/`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUserChipReplies(data || []);
+      }
+    } catch (error) {
+      console.error("Error fetching user chip replies:", error);
     }
   };
 
@@ -340,6 +426,8 @@ export default function ProfilePage(props: ProfilePageProps) {
       fetchUserAchievements();
       fetchUserReplies();
       fetchFollowStats();
+      fetchUserChips();
+      fetchUserChipReplies();
     }
   }, [token, userID, target_user_id]);
 
@@ -347,6 +435,72 @@ export default function ProfilePage(props: ProfilePageProps) {
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  // Add helper function to combine and sort activities
+  const getCombinedActivities = () => {
+    interface CombinedActivity {
+      id: string;
+      type: 'chip' | 'reply' | 'legacy-reply';
+      author: {
+        username: string;
+        profile_picture?: string | null;
+        user_id: string;
+      };
+      content: string;
+      title?: string;
+      created_at: string;
+      like_count?: number;
+    }
+
+    const activities: CombinedActivity[] = [];
+    
+    // Add chips
+    userChips.forEach(chip => {
+      activities.push({
+        id: `chip-${chip.chip_id}`,
+        type: 'chip',
+        author: {
+          username: username,
+          profile_picture: profilePicture,
+          user_id: chip.user_id.toString()
+        },
+        content: chip.description,
+        title: chip.title,
+        created_at: chip.created_at,
+        like_count: chip.like_count || 0
+      });
+    });
+    
+    // Add chip replies
+    userChipReplies.forEach(reply => {
+      activities.push({
+        id: `reply-${reply.id}`,
+        type: 'reply',
+        author: {
+          username: username,
+          profile_picture: profilePicture,
+          user_id: reply.user_id.toString()
+        },
+        content: reply.content,
+        created_at: reply.created_at,
+        like_count: reply.like_count || 0
+      });
+    });
+    
+    // Add existing replies (legacy)
+    userReplies.forEach(reply => {
+      activities.push({
+        id: `legacy-${reply.id}`,
+        type: 'legacy-reply',
+        author: reply.author,
+        content: reply.content,
+        created_at: reply.created_at
+      });
+    });
+    
+    // Sort by created_at (newest first)
+    return activities.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   };
 
   if (loading) {
@@ -482,7 +636,7 @@ export default function ProfilePage(props: ProfilePageProps) {
                 style={[styles.actionButton, styles.primaryButton]}
                 onPress={() => router.push('/ChangeProfilePicture')}
               >
-                Edit Profile
+                Profile Picture
               </Button>
               <Button
                 mode="outlined"
@@ -556,7 +710,15 @@ export default function ProfilePage(props: ProfilePageProps) {
             
             <Button
               mode="text"
-              onPress={() => router.push('/ViewRounds')}
+              onPress={() => {
+                // Use the same logic as other parts of the component to determine the profile user ID
+                const profileUserId = target_user_id || userID;
+                console.log('Navigating to ViewRounds with user ID:', profileUserId);
+                router.push({
+                  pathname: '/ViewRounds',
+                  params: { target_user_id: profileUserId?.toString() },
+                });
+              }}
               style={styles.viewMoreButton}
               textColor="#00BFFF"
               icon={({ color }) => <MaterialCommunityIcons name="chevron-right" size={20} color={color} />}
@@ -610,40 +772,60 @@ export default function ProfilePage(props: ProfilePageProps) {
             titleStyle={styles.cardTitle} 
           />
           <Card.Content>
-            {userReplies.length > 0 ? (
-              userReplies.slice(0, 3).map((reply) => (
-                <List.Item
-                  key={reply.id}
-                  title={reply.author.username}
-                  description={reply.content}
-                  descriptionNumberOfLines={2}
-                  descriptionStyle={styles.replyContent}
-                  titleStyle={styles.replyAuthor}
-                  left={() => (
-                    <Avatar.Image
-                      size={40}
-                      source={
-                        reply.author.profile_picture
-                          ? { uri: reply.author.profile_picture }
-                          : require('../../assets/default-profile.png')
-                      }
-                      style={styles.replyAvatar}
-                    />
-                  )}
-                  right={() => (
-                    <Text style={styles.replyDate}>{formatDate(reply.created_at)}</Text>
-                  )}
-                  style={styles.replyItem}
-                />
-              ))
-            ) : (
-              <View style={styles.emptyStateContainer}>
-                <MaterialCommunityIcons name="forum-outline" size={36} color="rgba(255,255,255,0.3)" />
-                <Text style={styles.emptyStateText}>No activity yet</Text>
-              </View>
-            )}
+            {(() => {
+              const combinedActivities = getCombinedActivities();
+              return combinedActivities.length > 0 ? (
+                combinedActivities.slice(0, 5).map((activity) => (
+                  <List.Item
+                    key={activity.id}
+                    title={
+                      <View style={styles.activityHeader}>
+                        <Text style={styles.replyAuthor}>@{activity.author.username}</Text>
+                        {/* Removed the activity type chips */}
+                      </View>
+                    }
+                    description={
+                      <View>
+                        {activity.type === 'chip' && activity.title && (
+                          <Text style={styles.chipTitle} numberOfLines={1}>{activity.title}</Text>
+                        )}
+                        <Text style={styles.replyContent} numberOfLines={2}>
+                          {activity.content}
+                        </Text>
+                        {(activity.type === 'chip' || activity.type === 'reply') && activity.like_count !== undefined && (
+                          <View style={styles.activityStats}>
+                            <MaterialCommunityIcons name="heart" size={14} color="#ff6b6b" />
+                            <Text style={styles.likeCount}>{activity.like_count}</Text>
+                          </View>
+                        )}
+                      </View>
+                    }
+                    left={() => (
+                      <Avatar.Image
+                        size={40}
+                        source={
+                          activity.author.profile_picture
+                            ? { uri: activity.author.profile_picture }
+                            : require('../../assets/default-profile.png')
+                        }
+                        style={styles.replyAvatar}
+                      />
+                    )}
+                    right={() => (
+                      <Text style={styles.replyDate}>{formatDate(activity.created_at)}</Text>
+                    )}
+                    style={styles.replyItem}
+                  />
+                ))
+              ) : (
+                <View style={styles.emptyStateContainer}>
+                  <MaterialCommunityIcons name="forum-outline" size={36} color="rgba(255,255,255,0.3)" />
+                  <Text style={styles.emptyStateText}>No activity yet</Text>
+                </View>
+              );
+            })()}
             
-            {userReplies.length > 0 && (
+            {getCombinedActivities().length > 0 && (
               <Button
                 mode="text"
                 onPress={() => Alert.alert("Coming Soon", "Full activity feed will be available in a future update.")}
@@ -910,18 +1092,20 @@ const styles = StyleSheet.create({
   },
   viewMoreButton: {
     alignSelf: 'flex-end',
-    marginTop: 8,
-  },
-  backButton: {
-    margin: 16,
-    borderColor: '#00BFFF',
+    margin: 8,  // Fixed: replaced redundant marginTop and margin with a single margin
   },
   backButtonContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 50, // Increased from 16 to 50 for iOS status bar
     paddingBottom: 8,
     backgroundColor: '#000026',
     zIndex: 10,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8, // Added vertical padding for better touch target
+    paddingHorizontal: 4, // Added horizontal padding for better touch target
   },
   backButtonText: {
     color: '#00BFFF',
@@ -952,6 +1136,38 @@ const styles = StyleSheet.create({
   footerText: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
-  }
+  },
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  activityTypeChip: {
+    backgroundColor: 'rgba(0, 191, 255, 0.1)', // More subtle background
+    marginLeft: 8,
+    height: 18, // Smaller height
+    borderRadius: 9, // More rounded
+  },
+  activityTypeText: {
+    color: '#00BFFF',
+    fontSize: 8, // Smaller text
+    fontWeight: '400', // Less bold
+  },
+  chipTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  activityStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  likeCount: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    marginLeft: 4,
+  },
 });
 

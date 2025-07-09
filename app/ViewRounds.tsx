@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { jwtDecode } from 'jwt-decode';
 import { useEffect, useState } from 'react';
@@ -37,6 +37,8 @@ interface Round {
 }
 
 export default function ViewRounds() {
+    const { target_user_id } = useLocalSearchParams<{ target_user_id?: string }>();
+    console.log("ViewRounds component initialized with target_user_id:", target_user_id);
     const [loading, setLoading] = useState(true);
     const [token, setToken] = useState<string | null>(null);
     const [userID, setUserID] = useState<string | null>(null);
@@ -55,8 +57,10 @@ export default function ViewRounds() {
             if (storedToken) {
                 setToken(storedToken);
                 const decoded: any = jwtDecode(storedToken);
-                setUserID(decoded.user_id);
-                await fetchRounds(storedToken);
+                
+                const userId = target_user_id || decoded.user_id;
+                setUserID(userId);
+                await fetchRounds(storedToken, userId);
             } else {
                 router.replace("/auth");
             }
@@ -66,11 +70,11 @@ export default function ViewRounds() {
         }
     };
 
-    const fetchRounds = async (authToken: string = token || '') => {
-        if (!authToken) return;
+    const fetchRounds = async (authToken: string = token || '', userId: string = userID || '') => {
+        if (!authToken || !userId) return;
         
         try {
-            const response = await fetch(`${BACKEND_URL}/api/rounds/`, { 
+            const response = await fetch(`${BACKEND_URL}/api/rounds/${userId}/`, { 
                 method: "GET",
                 headers: {
                     'Authorization': `Bearer ${authToken}`,
@@ -140,7 +144,7 @@ export default function ViewRounds() {
     const deleteRound = async (roundId: number) => {
         try {
            
-            const response = await fetch(`${BACKEND_URL}/api/rounds/${roundId}/`, {
+            const response = await fetch(`${BACKEND_URL}/api/rounds/${roundId}/delete/`, {
                 method: "DELETE",
                 headers: {
                     'Authorization': `Bearer ${token}`,

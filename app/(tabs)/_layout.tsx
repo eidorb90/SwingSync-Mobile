@@ -87,9 +87,9 @@ export default function TabsLayout() {
         title: "Profile",
         tabBarIcon: ({ color, focused }) => (
           focused ? (
-            <Ionicons name="settings" size={24} color={ color } />
+            <Ionicons name="person" size={24} color={ color } />
           ) : (
-            <Ionicons name="settings-outline" size={24} color={ color } />
+            <Ionicons name="person-outline" size={24} color={ color } />
           )
         )
       }}
